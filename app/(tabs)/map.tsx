@@ -1,6 +1,6 @@
 // map.tsx
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, PermissionsAndroid, Platform, TouchableOpacity, Modal, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, PermissionsAndroid, Platform, TouchableOpacity, Modal, Image, Alert, TextInput, ScrollView } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
@@ -27,11 +27,10 @@ type MarkerData = {
     latitude: number;
     longitude: number;
   };
-  images: {
-    left?: string;
-    middle?: string;
-    right?: string;
-  };
+  centerImage?: string;
+  branchImages: string[];
+  branchCount: number;
+  status: 'incomplete' | 'complete';
   nextMarkerId?: string; // Reference to the next marker in sequence
   isCurrentLocation?: boolean; // Flag for current location marker
 };
@@ -42,7 +41,9 @@ const MapScreen = () => {
   const [markers, setMarkers] = useState<MarkerData[]>([]);
   const [selectedMarker, setSelectedMarker] = useState<MarkerData | null>(null);
   const [imageModalVisible, setImageModalVisible] = useState(false);
-  const [images, setImages] = useState<{left?: string, middle?: string, right?: string}>({});
+  const [centerImage, setCenterImage] = useState<string | undefined>(undefined);
+  const [branchImages, setBranchImages] = useState<string[]>([]);
+  const [branchCount, setBranchCount] = useState(0);
   const [temporaryMarker, setTemporaryMarker] = useState<{latitude: number, longitude: number} | null>(null);
   const mapRef = useRef<MapView | null>(null);
 
@@ -60,6 +61,14 @@ const MapScreen = () => {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 
     return R * c;
+  };
+
+  // Calculate stats for markers
+  const getMarkerStats = () => {
+    const completeMarkers = markers.filter(m => m.status === 'complete' && !m.isCurrentLocation).length;
+    const incompleteMarkers = markers.filter(m => m.status === 'incomplete' && !m.isCurrentLocation).length;
+    
+    return { completeMarkers, incompleteMarkers };
   };
 
   useEffect(() => {
@@ -87,7 +96,9 @@ const MapScreen = () => {
             latitude: location.coords.latitude,
             longitude: location.coords.longitude
           },
-          images: {},
+          branchImages: [],
+          branchCount: 0,
+          status: 'complete',
           isCurrentLocation: true
         }]);
       } catch (error) {
@@ -100,6 +111,9 @@ const MapScreen = () => {
     if (editingMode && selectedMarker) {
       const newCoord = e.nativeEvent.coordinate;
       setTemporaryMarker(newCoord);
+      setBranchCount(0);
+      setBranchImages([]);
+      setCenterImage(undefined);
       setImageModalVisible(true);
     }
   };
@@ -153,12 +167,18 @@ const MapScreen = () => {
   };
 
   const saveMarker = () => {
-    if (!selectedMarker || !temporaryMarker) return;
+    if (!selectedMarker || !temporaryMarker || !centerImage) return;
+
+    // Check if all branches have images
+    const isComplete = branchCount === 0 || (branchImages.length === branchCount && branchImages.every(img => img !== undefined));
 
     const newMarker: MarkerData = {
       id: Date.now().toString(),
       coordinate: temporaryMarker,
-      images: {...images}
+      centerImage: centerImage,
+      branchImages: branchImages,
+      branchCount: branchCount,
+      status: isComplete ? 'complete' : 'incomplete'
     };
 
     // Update the previous marker to reference this new one
@@ -170,13 +190,15 @@ const MapScreen = () => {
     });
 
     setMarkers([...updatedMarkers, newMarker]);
-    setImages({});
+    setCenterImage(undefined);
+    setBranchImages([]);
+    setBranchCount(0);
     setImageModalVisible(false);
     setSelectedMarker(newMarker); // Auto-select the new marker for continuing
     setTemporaryMarker(null);
   };
 
-  const pickImage = async (position: 'left' | 'middle' | 'right') => {
+  const pickCenterImage = async () => {
     try {
       let result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -186,14 +208,40 @@ const MapScreen = () => {
       });
 
       if (!result.canceled) {
-        setImages(prev => ({
-          ...prev,
-          [position]: result.assets[0].uri
-        }));
+        setCenterImage(result.assets[0].uri);
       }
     } catch (error) {
       console.error('Error picking image:', error);
     }
+  };
+
+  const pickBranchImage = async (index: number) => {
+    try {
+      let result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 1,
+      });
+
+      if (!result.canceled) {
+        const newBranchImages = [...branchImages];
+        newBranchImages[index] = result.assets[0].uri;
+        setBranchImages(newBranchImages);
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+    }
+  };
+
+  const handleBranchCountChange = (text: string) => {
+    const count = parseInt(text, 10) || 0;
+    setBranchCount(count);
+    
+    // Initialize or resize branchImages array
+    const newBranchImages = [...branchImages];
+    newBranchImages.length = count;
+    setBranchImages(newBranchImages);
   };
 
   const focusOnCurrentLocation = () => {
@@ -302,6 +350,8 @@ const MapScreen = () => {
     return connections;
   };
 
+  const stats = getMarkerStats();
+
   return (
     <View style={styles.container}>
       {location ? (
@@ -324,7 +374,8 @@ const MapScreen = () => {
               coordinate={marker.coordinate}
               pinColor={
                 marker.isCurrentLocation ? '#4285F4' : 
-                selectedMarker?.id === marker.id ? '#FF7043' : '#4CAF50'
+                selectedMarker?.id === marker.id ? '#FF7043' : 
+                marker.status === 'complete' ? '#4CAF50' : '#FFEB3B' // Green for complete, Yellow for incomplete
               }
               onPress={() => handleMarkerPress(marker)}
             >
@@ -430,66 +481,132 @@ const MapScreen = () => {
         </TouchableOpacity>
       </View>
 
+      {/* Counter area */}
+      <View style={styles.counterContainer}>
+        <View style={styles.counterItem}>
+          <View style={styles.completedDot} />
+          <Text style={styles.counterText}>Complete: {stats.completeMarkers}</Text>
+        </View>
+        <View style={styles.counterItem}>
+          <View style={styles.incompleteDot} />
+          <Text style={styles.counterText}>Incomplete: {stats.incompleteMarkers}</Text>
+        </View>
+      </View>
+
       <Modal
         visible={imageModalVisible}
         animationType="slide"
         transparent={true}
         onRequestClose={() => {
           setImageModalVisible(false);
-          setImages({});
+          setCenterImage(undefined);
+          setBranchImages([]);
         }}
       >
         <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>Add Pole Images</Text>
-            
-            <View style={styles.imageSelectionContainer}>
-              {['left', 'middle', 'right'].map((position) => (
-                <TouchableOpacity
-                  key={position}
-                  style={styles.imageButton}
-                  onPress={() => pickImage(position as 'left' | 'middle' | 'right')}
-                >
-                  {images[position as keyof typeof images] ? (
-                    <Image
-                      source={{ uri: images[position as keyof typeof images] }}
-                      style={styles.imagePreview}
-                    />
-                  ) : (
-                    <View style={styles.imagePlaceholder}>
-                      <Ionicons name="image-outline" size={40} color="#888" />
-                      <Text style={styles.imageButtonText}>{position.charAt(0).toUpperCase() + position.slice(1)}</Text>
-                    </View>
-                  )}
-                  {images[position as keyof typeof images] && (
-                    <View style={styles.checkmark}>
-                      <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
+          <ScrollView>
+            <View style={styles.modalContent}>
+              <Text style={styles.modalTitle}>Add Pole Images</Text>
+              
+              {/* Center pole image upload */}
+              <View style={styles.sectionTitle}>
+                <Text style={styles.sectionTitleText}>Center Pole</Text>
+              </View>
+              
+              <TouchableOpacity
+                style={styles.centerImageButton}
+                onPress={pickCenterImage}
+              >
+                {centerImage ? (
+                  <Image
+                    source={{ uri: centerImage }}
+                    style={styles.imagePreview}
+                  />
+                ) : (
+                  <View style={styles.imagePlaceholder}>
+                    <Ionicons name="image-outline" size={40} color="#888" />
+                    <Text style={styles.imageButtonText}>Upload Center Image</Text>
+                  </View>
+                )}
+                {centerImage && (
+                  <View style={styles.checkmark}>
+                    <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
+                  </View>
+                )}
+              </TouchableOpacity>
 
-            <View style={styles.modalButtonContainer}>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => {
-                  setImageModalVisible(false);
-                  setImages({});
-                  setTemporaryMarker(null);
-                }}
-              >
-                <Text style={styles.modalButtonText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.saveButton]}
-                onPress={saveMarker}
-                disabled={Object.keys(images).length === 0}
-              >
-                <Text style={styles.modalButtonText}>Save Pole</Text>
-              </TouchableOpacity>
+              {/* Branch count input */}
+              <View style={styles.branchCountContainer}>
+                <Text style={styles.branchCountLabel}>Number of Branches:</Text>
+                <TextInput
+                  style={styles.branchCountInput}
+                  keyboardType="numeric"
+                  value={branchCount.toString()}
+                  onChangeText={handleBranchCountChange}
+                  placeholder="0"
+                />
+              </View>
+
+              {/* Branch images upload */}
+              {branchCount > 0 && (
+                <View style={styles.branchImagesContainer}>
+                  <View style={styles.sectionTitle}>
+                    <Text style={styles.sectionTitleText}>Branch Images</Text>
+                  </View>
+                  
+                  {Array.from({ length: branchCount }).map((_, index) => (
+                    <TouchableOpacity
+                      key={index}
+                      style={styles.branchImageButton}
+                      onPress={() => pickBranchImage(index)}
+                    >
+                      {branchImages[index] ? (
+                        <Image
+                          source={{ uri: branchImages[index] }}
+                          style={styles.branchImagePreview}
+                        />
+                      ) : (
+                        <View style={styles.branchImagePlaceholder}>
+                          <Ionicons name="image-outline" size={30} color="#888" />
+                          <Text style={styles.branchImageText}>Branch {index + 1}</Text>
+                        </View>
+                      )}
+                      {branchImages[index] && (
+                        <View style={styles.branchCheckmark}>
+                          <MaterialIcons name="check-circle" size={20} color="#4CAF50" />
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.modalButtonContainer}>
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.cancelButton]}
+                  onPress={() => {
+                    setImageModalVisible(false);
+                    setCenterImage(undefined);
+                    setBranchImages([]);
+                    setTemporaryMarker(null);
+                  }}
+                >
+                  <Text style={styles.modalButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.modalButton, 
+                    styles.saveButton,
+                    !centerImage && styles.saveButtonDisabled
+                  ]}
+                  onPress={saveMarker}
+                  disabled={!centerImage}
+                >
+                  <Text style={styles.modalButtonText}>Save Pole</Text>
+                </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </ScrollView>
         </View>
       </Modal>
     </View>
@@ -516,7 +633,7 @@ const styles = StyleSheet.create({
   },
   buttonGroup: {
     position: 'absolute',
-    bottom: 20,
+    bottom: 80, // Adjusted to make room for counter area
     right: 20,
     zIndex: 1,
   },
@@ -555,6 +672,38 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontWeight: 'bold',
   },
+  counterContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingVertical: 10,
+  },
+  counterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  completedDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#4CAF50',
+    marginRight: 5,
+  },
+  incompleteDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#FFEB3B',
+    marginRight: 5,
+  },
+  counterText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
   modalContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -566,6 +715,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderRadius: 15,
     padding: 20,
+    marginTop: 50,
+    marginBottom: 50,
+    alignSelf: 'center',
     alignItems: 'center',
   },
   modalTitle: {
@@ -574,29 +726,35 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     color: '#333',
   },
-  imageSelectionContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginBottom: 20,
+  sectionTitle: {
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+    marginTop: 10,
   },
-  imageButton: {
-    width: '30%',
-    aspectRatio: 1,
+  sectionTitleText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#555',
+  },
+  centerImageButton: {
+    width: '90%',
+    aspectRatio: 4/3,
     borderRadius: 10,
     backgroundColor: '#f0f0f0',
     justifyContent: 'center',
     alignItems: 'center',
     overflow: 'hidden',
     position: 'relative',
+    marginBottom: 20,
   },
   imagePlaceholder: {
     justifyContent: 'center',
     alignItems: 'center',
   },
   imageButtonText: {
-    marginTop: 5,
+    marginTop: 10,
     color: '#666',
+    fontWeight: 'bold',
   },
   imagePreview: {
     width: '100%',
@@ -604,15 +762,73 @@ const styles = StyleSheet.create({
   },
   checkmark: {
     position: 'absolute',
+    top: 10,
+    right: 10,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 2,
+  },
+  branchCountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    width: '90%',
+    marginVertical: 10,
+  },
+  branchCountLabel: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#555',
+  },
+  branchCountInput: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    padding: 10,
+    width: 80,
+    textAlign: 'center',
+    fontSize: 16,
+  },
+  branchImagesContainer: {
+    width: '90%',
+    marginVertical: 10,
+  },
+  branchImageButton: {
+    width: '100%',
+    height: 100,
+    borderRadius: 10,
+    backgroundColor: '#f0f0f0',
+    justifyContent: 'center',
+    alignItems: 'center',
+    overflow: 'hidden',
+    position: 'relative',
+    marginBottom: 10,
+  },
+  branchImagePlaceholder: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  branchImageText: {
+    marginLeft: 10,
+    color: '#666',
+  },
+  branchImagePreview: {
+    width: '100%',
+    height: '100%',
+  },
+  branchCheckmark: {
+    position: 'absolute',
     top: 5,
     right: 5,
     backgroundColor: 'white',
-    borderRadius: 12,
+    borderRadius: 10,
+    padding: 2,
   },
   modalButtonContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    width: '100%',
+    width: '90%',
+    marginTop: 20,
   },
   modalButton: {
     flex: 1,
@@ -626,6 +842,9 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     backgroundColor: '#4285F4',
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#b3b3b3',
   },
   modalButtonText: {
     color: 'white',
