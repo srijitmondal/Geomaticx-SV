@@ -3,10 +3,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, PermissionsAndroid, Platform, TouchableOpacity, Modal, Image, Alert, TextInput, ScrollView } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import * as Location from 'expo-location';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
-import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons';
-
+import { useLocalSearchParams, useRouter } from 'expo-router';
 // Patch for crypto.getRandomValues
 import 'react-native-get-random-values';
 
@@ -35,7 +34,11 @@ type MarkerData = {
   isCurrentLocation?: boolean; // Flag for current location marker
 };
 
-const MapScreen = () => {
+const MapScreen = ({ navigation, route }: any) => {
+
+  const router = useRouter();
+  const params = useLocalSearchParams();
+
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
   const [editingMode, setEditingMode] = useState(false);
   const [markers, setMarkers] = useState<MarkerData[]>([]);
@@ -46,6 +49,8 @@ const MapScreen = () => {
   const [branchCount, setBranchCount] = useState(0);
   const [temporaryMarker, setTemporaryMarker] = useState<{latitude: number, longitude: number} | null>(null);
   const mapRef = useRef<MapView | null>(null);
+  const [photoViewerVisible, setPhotoViewerVisible] = useState(false);
+  const [viewingMarker, setViewingMarker] = useState<MarkerData | null>(null);
 
   // Helper function to calculate distance between two coordinates in meters
   const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -107,37 +112,100 @@ const MapScreen = () => {
     })();
   }, []);
 
+  useEffect(() => {
+    const capturedImageStr = params.capturedImage;
+    const returnedMarkerId = params.markerId;
+    const markerType = params.markerType;
+    const branchIndex = params.branchIndex !== undefined ? Number(params.branchIndex) : undefined;
+    const returnToModal = params.returnToModal === 'true';
+    const tempMarkerLat = params.tempMarkerLat ? parseFloat(params.tempMarkerLat as string) : undefined;
+    const tempMarkerLng = params.tempMarkerLng ? parseFloat(params.tempMarkerLng as string) : undefined;
+    
+    // Restore temporary marker if parameters exist
+    if (tempMarkerLat && tempMarkerLng) {
+      setTemporaryMarker({
+        latitude: tempMarkerLat,
+        longitude: tempMarkerLng
+      });
+    }
+    
+    if (capturedImageStr && returnedMarkerId) {
+      try {
+        // Parse the stringified image data
+        const capturedImage = JSON.parse(capturedImageStr as string);
+        console.log("Received image data:", capturedImage);
+        
+        if (markerType === 'center') {
+          // Update center image with the URI
+          console.log("Setting center image:", capturedImage.uri);
+          setCenterImage(capturedImage.uri);
+        } else if (markerType === 'branch' && branchIndex !== undefined) {
+          // Update branch image with the URI
+          console.log("Setting branch image at index", branchIndex, capturedImage.uri);
+          const newBranchImages = [...branchImages];
+          newBranchImages[branchIndex] = capturedImage.uri;
+          setBranchImages(newBranchImages);
+        }
+        
+        // If we were in modal before going to camera, reopen it
+        if (returnToModal) {
+          console.log("Reopening modal");
+          setImageModalVisible(true);
+        }
+      } catch (error) {
+        console.error("Error parsing captured image data:", error);
+      }
+    }
+  }, [params]);
   const handleMapPress = (e: any) => {
-    if (editingMode && selectedMarker) {
+    if (editingMode) {
       const newCoord = e.nativeEvent.coordinate;
       setTemporaryMarker(newCoord);
-      setBranchCount(0);
-      setBranchImages([]);
-      setCenterImage(undefined);
+      
+      // Create a new selected marker if none exists
+      if (!selectedMarker) {
+        const currentLocationMarker = markers.find(m => m.isCurrentLocation);
+        setSelectedMarker(currentLocationMarker || null);
+      }
+      
       setImageModalVisible(true);
     }
   };
 
   const handleMarkerPress = (marker: MarkerData) => {
+    // Always load the marker's data when pressed
+    console.log('Marker pressed:', marker.id);
+    setSelectedMarker(marker);
+    setCenterImage(marker.centerImage);
+    setBranchImages([...marker.branchImages]);
+    setBranchCount(marker.branchCount);
+  
     if (editingMode) {
-      setSelectedMarker(marker);
       Alert.alert(
-        'Add Next Pole',
-        `Do you want to add the next pole after this one?`,
+        'Marker Options',
+        'What would you like to do with this marker?',
         [
           {
             text: 'Cancel',
-            style: 'cancel',
-            onPress: () => setSelectedMarker(null)
+            style: 'cancel'
           },
           {
-            text: 'Continue',
+            text: 'Add Next Pole',
             onPress: () => {
-              // Selected marker is already set
+              // Ready to add next pole
+            }
+          },
+          {
+            text: 'View Photos',
+            onPress: () => {
+              setImageModalVisible(true);
             }
           }
         ]
       );
+    } else {
+      // Directly show the modal when not in editing mode
+      setImageModalVisible(true);
     }
   };
 
@@ -167,72 +235,109 @@ const MapScreen = () => {
   };
 
   const saveMarker = () => {
-    if (!selectedMarker || !temporaryMarker || !centerImage) return;
-
-    // Check if all branches have images
-    const isComplete = branchCount === 0 || (branchImages.length === branchCount && branchImages.every(img => img !== undefined));
-
+    if (!temporaryMarker || !centerImage) return;
+  
     const newMarker: MarkerData = {
       id: Date.now().toString(),
       coordinate: temporaryMarker,
       centerImage: centerImage,
       branchImages: branchImages,
       branchCount: branchCount,
-      status: isComplete ? 'complete' : 'incomplete'
+      status: (branchCount === 0 || branchImages.length === branchCount) ? 'complete' : 'incomplete'
     };
-
-    // Update the previous marker to reference this new one
-    const updatedMarkers = markers.map(m => {
-      if (m.id === selectedMarker.id) {
-        return {...m, nextMarkerId: newMarker.id};
-      }
-      return m;
-    });
-
-    setMarkers([...updatedMarkers, newMarker]);
+  
+    // If we have a selected marker, link them
+    if (selectedMarker) {
+      const updatedMarkers = markers.map(m => {
+        if (m.id === selectedMarker.id) {
+          return {...m, nextMarkerId: newMarker.id};
+        }
+        return m;
+      });
+      setMarkers([...updatedMarkers, newMarker]);
+    } else {
+      // Add as first marker
+      setMarkers([...markers, newMarker]);
+    }
+  
+    // Reset temporary states
+    setTemporaryMarker(null);
     setCenterImage(undefined);
     setBranchImages([]);
     setBranchCount(0);
     setImageModalVisible(false);
-    setSelectedMarker(newMarker); // Auto-select the new marker for continuing
-    setTemporaryMarker(null);
+    
+    // Keep the new marker selected
+    setSelectedMarker(newMarker);
   };
 
   const pickCenterImage = async () => {
-    try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 1,
-      });
-
-      if (!result.canceled) {
-        setCenterImage(result.assets[0].uri);
+    // First close the modal
+    setImageModalVisible(false);
+    
+    // Store current state in navigation params to ensure it can be restored
+    router.push({
+      pathname: '/',  // This is your index.tsx that has the camera
+      params: {
+        markerId: selectedMarker?.id || 'temp-marker',
+        markerType: 'center',
+        returnToModal: 'true',
+        // Store temporary marker position to restore it when returning
+        tempMarkerLat: temporaryMarker?.latitude.toString(),
+        tempMarkerLng: temporaryMarker?.longitude.toString(),
+        // Store branch count and existing images to maintain state
+        branchCount: branchCount.toString(),
+        branchImagesState: JSON.stringify(branchImages)
       }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
+    });
   };
 
   const pickBranchImage = async (index: number) => {
-    try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 1,
-      });
-
-      if (!result.canceled) {
-        const newBranchImages = [...branchImages];
-        newBranchImages[index] = result.assets[0].uri;
-        setBranchImages(newBranchImages);
+    // First close the modal
+    setImageModalVisible(false);
+    
+    // Store current state in navigation params
+    router.push({
+      pathname: '/',
+      params: {
+        markerId: selectedMarker?.id || 'temp-marker',
+        markerType: 'branch',
+        branchIndex: index.toString(),
+        returnToModal: 'true',
+        // Store temporary marker position to restore it when returning
+        tempMarkerLat: temporaryMarker?.latitude.toString(),
+        tempMarkerLng: temporaryMarker?.longitude.toString(),
+        // Store center image and branch count to maintain state
+        centerImageState: centerImage,
+        branchCount: branchCount.toString(),
+        branchImagesState: JSON.stringify(branchImages)
       }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
+    });
   };
+
+  useEffect(() => {
+    // Restore branch images and center image if they were passed as params
+    const branchImagesState = params.branchImagesState;
+    const centerImageState = params.centerImageState;
+    const branchCountParam = params.branchCount;
+    
+    if (branchImagesState) {
+      try {
+        const parsedBranchImages = JSON.parse(branchImagesState as string);
+        setBranchImages(parsedBranchImages);
+      } catch (error) {
+        console.error("Error parsing branch images state:", error);
+      }
+    }
+    
+    if (centerImageState) {
+      setCenterImage(centerImageState as string);
+    }
+    
+    if (branchCountParam) {
+      setBranchCount(parseInt(branchCountParam as string, 10) || 0);
+    }
+  }, [params.branchImagesState, params.centerImageState, params.branchCount]);
 
   const handleBranchCountChange = (text: string) => {
     const count = parseInt(text, 10) || 0;
@@ -254,6 +359,36 @@ const MapScreen = () => {
       });
     }
   };
+
+  // Load markers from storage on mount
+useEffect(() => {
+  const loadMarkers = async () => {
+    try {
+      const savedMarkers = await AsyncStorage.getItem('surveyMarkers');
+      if (savedMarkers) {
+        setMarkers(JSON.parse(savedMarkers));
+      }
+    } catch (error) {
+      console.error('Failed to load markers', error);
+    }
+  };
+  loadMarkers();
+}, []);
+
+// Save markers to storage when they change
+useEffect(() => {
+  const saveMarkers = async () => {
+    try {
+      await AsyncStorage.setItem('surveyMarkers', JSON.stringify(markers));
+    } catch (error) {
+      console.error('Failed to save markers', error);
+    }
+  };
+  if (markers.length > 0) {
+    saveMarkers();
+  }
+}, [markers]);
+
 
   const renderArrow = (from: MarkerData, to: MarkerData) => {
     // Calculate distance
@@ -356,99 +491,48 @@ const MapScreen = () => {
     <View style={styles.container}>
       {location ? (
         <MapView
-          style={styles.map}
-          ref={mapRef}
-          mapType="satellite"
-          initialRegion={{
-            latitude: location.coords.latitude,
-            longitude: location.coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
-          }}
-          showsUserLocation={false} // We're using our own marker
-          onPress={handleMapPress}
-        >
-          {markers.map(marker => (
-            <Marker
-              key={marker.id}
-              coordinate={marker.coordinate}
-              pinColor={
-                marker.isCurrentLocation ? '#4285F4' : 
-                selectedMarker?.id === marker.id ? '#FF7043' : 
-                marker.status === 'complete' ? '#4CAF50' : '#FFEB3B' // Green for complete, Yellow for incomplete
-              }
-              onPress={() => handleMarkerPress(marker)}
-            >
-              {marker.isCurrentLocation && (
-                <View style={styles.currentLocationBadge}>
-                  <Text style={styles.currentLocationText}>You</Text>
-                </View>
-              )}
-            </Marker>
-          ))}
-          
-          {temporaryMarker && (
-            <Marker
-              coordinate={temporaryMarker}
-              pinColor="#FF7043"
-            />
-          )}
-          
-          {getMarkerConnections()}
-        </MapView>
+        style={styles.map}
+        ref={mapRef}
+        onPress={handleMapPress}
+      >
+        {/* Current location marker */}
+        {location && (
+          <Marker
+            coordinate={{
+              latitude: location.coords.latitude,
+              longitude: location.coords.longitude
+            }}
+            pinColor="#4285F4"
+          >
+            <View style={styles.currentLocationBadge}>
+              <Text style={styles.currentLocationText}>You</Text>
+            </View>
+          </Marker>
+        )}
+      
+        {/* Survey poles */}
+        {markers.map(marker => (
+          <Marker
+            key={marker.id}
+            coordinate={marker.coordinate}
+            onPress={() => handleMarkerPress(marker)}
+            pinColor={marker.status === 'complete' ? '#4CAF50' : '#FFEB3B'}
+          />
+        ))}
+      
+        {/* Temporary marker (while creating new pole) */}
+        {temporaryMarker && (
+          <Marker
+            coordinate={temporaryMarker}
+            pinColor="#FF7043"
+          />
+        )}
+      </MapView>
       ) : (
         <View style={styles.loadingContainer}>
           <Text style={styles.loadingText}>Loading map...</Text>
         </View>
       )}
-
-      <GooglePlacesAutocomplete
-        placeholder="Search places..."
-        fetchDetails={true}
-        onPress={(data, details = null) => {
-          if (details) {
-            const { lat, lng } = details.geometry.location;
-            mapRef.current?.animateToRegion({
-              latitude: lat,
-              longitude: lng,
-              latitudeDelta: 0.01,
-              longitudeDelta: 0.01,
-            });
-          }
-        }}
-        query={{
-          key: 'YOUR_GOOGLE_MAPS_API_KEY',
-          language: 'en',
-        }}
-        styles={{
-          container: {
-            position: 'absolute',
-            width: '90%',
-            top: 10,
-            alignSelf: 'center',
-            zIndex: 1,
-          },
-          textInput: {
-            backgroundColor: 'white',
-            borderRadius: 20,
-            paddingHorizontal: 20,
-            fontSize: 16,
-            shadowColor: '#000',
-            shadowOffset: {
-              width: 0,
-              height: 2,
-            },
-            shadowOpacity: 0.25,
-            shadowRadius: 3.84,
-            elevation: 5,
-          },
-          listView: {
-            backgroundColor: 'white',
-            borderRadius: 10,
-            marginTop: 10,
-          },
-        }}
-      />
 
       <View style={styles.buttonGroup}>
         <TouchableOpacity
@@ -494,121 +578,143 @@ const MapScreen = () => {
       </View>
 
       <Modal
-        visible={imageModalVisible}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => {
-          setImageModalVisible(false);
-          setCenterImage(undefined);
-          setBranchImages([]);
-        }}
-      >
-        <View style={styles.modalContainer}>
-          <ScrollView>
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Add Pole Images</Text>
-              
-              {/* Center pole image upload */}
-              <View style={styles.sectionTitle}>
-                <Text style={styles.sectionTitleText}>Center Pole</Text>
-              </View>
-              
+  visible={imageModalVisible}
+  animationType="slide"
+  transparent={true}
+  onRequestClose={() => {
+    setImageModalVisible(false);
+    // Only reset these if we're not viewing an existing marker
+    if (!selectedMarker || temporaryMarker) {
+      setCenterImage(undefined);
+      setBranchImages([]);
+      setBranchCount(0);
+    }
+  }}
+>
+  <View style={styles.modalContainer}>
+    <ScrollView>
+      <View style={styles.modalContent}>
+        <Text style={styles.modalTitle}>
+          {temporaryMarker ? 'Add Pole Images' : 'View Pole Images'}
+        </Text>
+        
+        {/* Center pole image upload */}
+        <View style={styles.sectionTitle}>
+          <Text style={styles.sectionTitleText}>Center Pole</Text>
+        </View>
+        
+        <TouchableOpacity
+          style={styles.centerImageButton}
+          onPress={temporaryMarker ? pickCenterImage : undefined}
+          disabled={!temporaryMarker}
+        >
+          {centerImage ? (
+            <Image
+              source={{ uri: centerImage }}
+              style={styles.imagePreview}
+            />
+          ) : (
+            <View style={styles.imagePlaceholder}>
+              <Ionicons name="image-outline" size={40} color="#888" />
+              <Text style={styles.imageButtonText}>
+                {temporaryMarker ? 'Upload Center Image' : 'No Center Image'}
+              </Text>
+            </View>
+          )}
+          {centerImage && (
+            <View style={styles.checkmark}>
+              <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {/* Branch count input or display */}
+        <View style={styles.branchCountContainer}>
+          <Text style={styles.branchCountLabel}>Number of Branches:</Text>
+          {temporaryMarker ? (
+            <TextInput
+              style={styles.branchCountInput}
+              keyboardType="numeric"
+              value={branchCount.toString()}
+              onChangeText={handleBranchCountChange}
+              placeholder="0"
+            />
+          ) : (
+            <Text style={styles.branchCountValue}>{branchCount}</Text>
+          )}
+        </View>
+
+        {/* Branch images upload or display */}
+        {branchCount > 0 && (
+          <View style={styles.branchImagesContainer}>
+            <View style={styles.sectionTitle}>
+              <Text style={styles.sectionTitleText}>Branch Images</Text>
+            </View>
+            
+            {Array.from({ length: branchCount }).map((_, index) => (
               <TouchableOpacity
-                style={styles.centerImageButton}
-                onPress={pickCenterImage}
+                key={index}
+                style={styles.branchImageButton}
+                onPress={temporaryMarker ? () => pickBranchImage(index) : undefined}
+                disabled={!temporaryMarker}
               >
-                {centerImage ? (
+                {branchImages[index] ? (
                   <Image
-                    source={{ uri: centerImage }}
-                    style={styles.imagePreview}
+                    source={{ uri: branchImages[index] }}
+                    style={styles.branchImagePreview}
                   />
                 ) : (
-                  <View style={styles.imagePlaceholder}>
-                    <Ionicons name="image-outline" size={40} color="#888" />
-                    <Text style={styles.imageButtonText}>Upload Center Image</Text>
+                  <View style={styles.branchImagePlaceholder}>
+                    <Ionicons name="image-outline" size={30} color="#888" />
+                    <Text style={styles.branchImageText}>Branch {index + 1}</Text>
                   </View>
                 )}
-                {centerImage && (
-                  <View style={styles.checkmark}>
-                    <MaterialIcons name="check-circle" size={24} color="#4CAF50" />
+                {branchImages[index] && (
+                  <View style={styles.branchCheckmark}>
+                    <MaterialIcons name="check-circle" size={20} color="#4CAF50" />
                   </View>
                 )}
               </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
-              {/* Branch count input */}
-              <View style={styles.branchCountContainer}>
-                <Text style={styles.branchCountLabel}>Number of Branches:</Text>
-                <TextInput
-                  style={styles.branchCountInput}
-                  keyboardType="numeric"
-                  value={branchCount.toString()}
-                  onChangeText={handleBranchCountChange}
-                  placeholder="0"
-                />
-              </View>
-
-              {/* Branch images upload */}
-              {branchCount > 0 && (
-                <View style={styles.branchImagesContainer}>
-                  <View style={styles.sectionTitle}>
-                    <Text style={styles.sectionTitleText}>Branch Images</Text>
-                  </View>
-                  
-                  {Array.from({ length: branchCount }).map((_, index) => (
-                    <TouchableOpacity
-                      key={index}
-                      style={styles.branchImageButton}
-                      onPress={() => pickBranchImage(index)}
-                    >
-                      {branchImages[index] ? (
-                        <Image
-                          source={{ uri: branchImages[index] }}
-                          style={styles.branchImagePreview}
-                        />
-                      ) : (
-                        <View style={styles.branchImagePlaceholder}>
-                          <Ionicons name="image-outline" size={30} color="#888" />
-                          <Text style={styles.branchImageText}>Branch {index + 1}</Text>
-                        </View>
-                      )}
-                      {branchImages[index] && (
-                        <View style={styles.branchCheckmark}>
-                          <MaterialIcons name="check-circle" size={20} color="#4CAF50" />
-                        </View>
-                      )}
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-
-              <View style={styles.modalButtonContainer}>
-                <TouchableOpacity
-                  style={[styles.modalButton, styles.cancelButton]}
-                  onPress={() => {
-                    setImageModalVisible(false);
-                    setCenterImage(undefined);
-                    setBranchImages([]);
-                    setTemporaryMarker(null);
-                  }}
-                >
-                  <Text style={styles.modalButtonText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[
-                    styles.modalButton, 
-                    styles.saveButton,
-                    !centerImage && styles.saveButtonDisabled
-                  ]}
-                  onPress={saveMarker}
-                  disabled={!centerImage}
-                >
-                  <Text style={styles.modalButtonText}>Save Pole</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </ScrollView>
+        <View style={styles.modalButtonContainer}>
+          <TouchableOpacity
+            style={[styles.modalButton, styles.cancelButton]}
+            onPress={() => {
+              setImageModalVisible(false);
+              if (temporaryMarker) {
+                setCenterImage(undefined);
+                setBranchImages([]);
+                setBranchCount(0);
+                setTemporaryMarker(null);
+              }
+            }}
+          >
+            <Text style={styles.modalButtonText}>
+              {temporaryMarker ? 'Cancel' : 'Close'}
+            </Text>
+          </TouchableOpacity>
+          
+          {temporaryMarker && (
+            <TouchableOpacity
+              style={[
+                styles.modalButton, 
+                styles.saveButton,
+                !centerImage && styles.saveButtonDisabled
+              ]}
+              onPress={saveMarker}
+              disabled={!centerImage}
+            >
+              <Text style={styles.modalButtonText}>Save Pole</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      </Modal>
+      </View>
+    </ScrollView>
+  </View>
+</Modal>
     </View>
   );
 };
@@ -653,6 +759,15 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
+  },
+  branchCountValue: {
+    backgroundColor: '#f0f0f0',
+    borderRadius: 5,
+    padding: 10,
+    width: 80,
+    textAlign: 'center',
+    fontSize: 16,
+    color: '#555',
   },
   locationButton: {
     backgroundColor: '#4285F4',
@@ -699,6 +814,10 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     backgroundColor: '#FFEB3B',
     marginRight: 5,
+  },
+  // In your styles
+  marker: {
+    zIndex: 1,
   },
   counterText: {
     color: 'white',
