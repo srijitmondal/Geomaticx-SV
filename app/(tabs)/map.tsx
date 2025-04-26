@@ -224,8 +224,8 @@ const MapScreen = () => {
       mapRef.current?.animateToRegion({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
+        latitudeDelta: 0.001, // set zoom level
+        longitudeDelta: 0.001,
       });
     }
   };
@@ -240,8 +240,8 @@ const MapScreen = () => {
           initialRegion={{
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
+            latitudeDelta: 0.005, // More zoomed in
+            longitudeDelta: 0.005,
           }}
           showsUserLocation={false} // We're using our own marker
           onPress={handleMapPress}

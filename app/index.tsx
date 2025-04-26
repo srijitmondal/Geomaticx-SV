@@ -128,7 +128,7 @@ function LoginScreen() {
     >
       <StatusBar style="light" />
       <LinearGradient
-        colors={['#1a237e', '#0d47a1', '#01579b']}
+        colors={['#000000', '#1a1a1a', '#333333']}
         style={{ flex: 1 }}
       >
         <View style={styles.overlay} />
@@ -150,7 +150,8 @@ function LoginScreen() {
               entering={FadeInDown.duration(1000).delay(200).springify()}
               style={styles.title}
             >
-              Welcome Back
+              Survey Camera
+              
             </Animated.Text>
 
             <Animated.View 
@@ -315,13 +316,13 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   loginButton: {
-    backgroundColor: 'rgba(41, 98, 255, 0.9)',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
     height: 56,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
-    shadowColor: '#1a237e',
+    shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
@@ -330,7 +331,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   loginButtonLoading: {
-    backgroundColor: '#1565c0',
+    backgroundColor: '#333333',
   },
   loginButtonText: {
     color: '#fff',
