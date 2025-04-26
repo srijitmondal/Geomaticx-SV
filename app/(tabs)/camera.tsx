@@ -1,11 +1,11 @@
+// app/(tabs)/index.tsx
 import { useEffect, useState, useRef } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Platform, Modal } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Platform, Modal, ActivityIndicator } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import * as MediaLibrary from 'expo-media-library';
 import { Accelerometer, Magnetometer } from 'expo-sensors';
 import { Camera as CameraIcon, Crosshair, Check, X } from 'lucide-react-native';
-import { captureImageWithMetadata, ImageCaptureError } from '@/utils/imageCapture';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 interface SensorData {
@@ -21,7 +21,6 @@ interface LocationData {
   accuracy: number;
 }
 
-// New interface for captured image data to share with MapScreen
 export interface CapturedImageData {
   uri: string;
   metadata: {
@@ -31,8 +30,8 @@ export interface CapturedImageData {
   };
 }
 
-export default function SurveyScreen({ route, navigation }: any) {
-  const cameraRef = useRef(null);
+export default function CameraScreen() {
+  const cameraRef = useRef<CameraView>(null);
   const [facing, setFacing] = useState<CameraType>('back');
   const [permission, requestPermission] = useCameraPermissions();
   const [mediaPermission, requestMediaPermission] = MediaLibrary.usePermissions();
@@ -47,20 +46,47 @@ export default function SurveyScreen({ route, navigation }: any) {
   const [capturing, setCapturing] = useState(false);
   const [capturedImage, setCapturedImage] = useState<CapturedImageData | null>(null);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
+  const [loading, setLoading] = useState(true);
   
-  // Extract parameters from route if available
-  const markerId = route?.params?.markerId;
-  const markerType = route?.params?.markerType; // 'center' or 'branch'
-  const branchIndex = route?.params?.branchIndex;
-  const returnToModal = route?.params?.returnToModal === 'true';
-
   const router = useRouter();
   const params = useLocalSearchParams();
-  
-  // Same sensor and location setup as before...
-  
+
+  // Get parameters from navigation
+  const markerId = params.markerId as string | undefined;
+  const markerType = params.markerType as 'center' | 'branch' | undefined;
+  const branchIndex = params.branchIndex ? parseInt(params.branchIndex as string) : undefined;
+  const returnToModal = params.returnToModal === 'true';
+
   useEffect(() => {
     if (Platform.OS === 'web') {
+      setLoading(false);
+      return;
+    }
+
+    const initialize = async () => {
+      // Request camera permissions
+      if (!permission?.granted) {
+        await requestPermission();
+      }
+
+      // Request media permissions
+      if (!mediaPermission?.granted) {
+        await requestMediaPermission();
+      }
+
+      // Request location permissions
+      if (!locationPermission?.granted) {
+        await requestLocationPermission();
+      }
+
+      setLoading(false);
+    };
+
+    initialize();
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web' || loading) {
       return;
     }
 
@@ -86,10 +112,10 @@ export default function SurveyScreen({ route, navigation }: any) {
     };
 
     subscribeToSensors();
-  }, []);
+  }, [loading]);
 
   useEffect(() => {
-    if (Platform.OS === 'web') {
+    if (Platform.OS === 'web' || loading) {
       return;
     }
 
@@ -99,12 +125,11 @@ export default function SurveyScreen({ route, navigation }: any) {
         if (!permission.granted) return;
       }
 
-      // Configure for highest accuracy
       await Location.enableNetworkProviderAsync();
       
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.BestForNavigation,
-        mayShowUserSettingsDialog: true, // Prompt user to enable high accuracy mode
+        mayShowUserSettingsDialog: true,
       });
 
       setLocation({
@@ -119,7 +144,7 @@ export default function SurveyScreen({ route, navigation }: any) {
       {
         accuracy: Location.Accuracy.BestForNavigation,
         timeInterval: 1000,
-        distanceInterval: 0.1, // Update every 0.1 meters for higher precision
+        distanceInterval: 0.1,
       },
       location => {
         setLocation({
@@ -136,50 +161,24 @@ export default function SurveyScreen({ route, navigation }: any) {
     return () => {
       locationSubscription.then(sub => sub.remove());
     };
-  }, [locationPermission]);
-
-  // Request media library permission if needed
-  useEffect(() => {
-    if (!mediaPermission?.granted) {
-      requestMediaPermission();
-    }
-  }, [mediaPermission]);
-
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.webMessage}>
-          Camera and sensor features are not available on web. Please use a mobile device.
-        </Text>
-      </View>
-    );
-  }
-
-  if (!permission?.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.message}>We need your permission to show the camera</Text>
-        <TouchableOpacity style={styles.button} onPress={requestPermission}>
-          <Text style={styles.buttonText}>Grant Permission</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  }, [loading, locationPermission]);
 
   const handleCapture = async () => {
-    if (Platform.OS === 'web' || capturing) return;
+    if (Platform.OS === 'web' || capturing || !cameraRef.current) return;
 
     try {
       setCapturing(true);
       setError(null);
 
-      const result = await captureImageWithMetadata(cameraRef);
-      console.log('Photo captured successfully:', result.uri);
-      
-      if (result && location && sensorData) {
-        // Create a standardized object with image and metadata
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.8,
+        exif: true,
+        skipProcessing: false,
+      });
+
+      if (photo && location && sensorData) {
         const imageData: CapturedImageData = {
-          uri: result.uri,
+          uri: photo.uri,
           metadata: {
             location: {
               latitude: location.latitude,
@@ -196,17 +195,11 @@ export default function SurveyScreen({ route, navigation }: any) {
           }
         };
         
-        // Store the captured image and show the confirmation modal
         setCapturedImage(imageData);
         setShowConfirmModal(true);
       }
-      
     } catch (error) {
-      if (error instanceof ImageCaptureError) {
-        setError(error.message);
-      } else {
-        setError('Failed to capture image');
-      }
+      setError('Failed to capture image');
       console.error('Capture error:', error);
     } finally {
       setCapturing(false);
@@ -216,69 +209,44 @@ export default function SurveyScreen({ route, navigation }: any) {
   const saveToGallery = async (uri: string) => {
     try {
       if (mediaPermission?.granted) {
-        const asset = await MediaLibrary.createAssetAsync(uri);
-        await MediaLibrary.createAlbumAsync('SurveyPoles', asset, false);
+        await MediaLibrary.saveToLibraryAsync(uri);
         console.log('Saved to gallery');
         return true;
-      } else {
-        console.log('No permission to save to gallery');
-        return false;
       }
+      return false;
     } catch (error) {
       console.error('Error saving to gallery:', error);
       return false;
     }
   };
 
-const handleConfirm = async () => {
-  if (!capturedImage) return;
-  
-  try {
-    // Save to gallery
-    await saveToGallery(capturedImage.uri);
+  const handleConfirm = async () => {
+    if (!capturedImage) return;
     
-    // Close modal
-    setShowConfirmModal(false);
-    
-    // Extract route parameters for return navigation
-    const routeParams = route?.params || {};
-    
-    // Get params from incoming navigation if possible
-    const tempMarkerLat = routeParams.tempMarkerLat;
-    const tempMarkerLng = routeParams.tempMarkerLng;
-    const branchCount = routeParams.branchCount;
-    const branchImagesState = routeParams.branchImagesState;
-    const centerImageState = routeParams.centerImageState;
-    
-    console.log("Sending image back to map:", capturedImage.uri);
-    
-    // Navigate back to map with the captured image and preserved state
-    router.push({
-      pathname: '/map',
-      params: {
-        // The key issue: stringify the entire capturedImage object properly
-        capturedImage: JSON.stringify(capturedImage),
-        markerId: markerId || routeParams.markerId,
-        markerType: markerType || routeParams.markerType,
-        branchIndex: branchIndex !== undefined ? branchIndex : routeParams.branchIndex,
-        returnToModal: returnToModal || routeParams.returnToModal ? 'true' : 'false',
-        // Pass back all the state we received
-        tempMarkerLat,
-        tempMarkerLng,
-        branchCount,
-        branchImagesState,
-        centerImageState
-      }
-    });
-  } catch (error) {
-    console.error("Error in handleConfirm:", error);
-    // Proceed with navigation anyway to avoid getting stuck
-    router.push('/map');
-  }
-};
+    try {
+      // Save to gallery
+      await saveToGallery(capturedImage.uri);
+      
+      // Navigate back with the captured image data
+      router.push({
+        pathname: '/map',
+        params: {
+          capturedImage: JSON.stringify(capturedImage),
+          markerId,
+          markerType,
+          branchIndex: branchIndex?.toString(),
+          returnToModal: returnToModal ? 'true' : 'false',
+          // Pass back any other state we received
+          ...params
+        }
+      });
+    } catch (error) {
+      console.error("Error in handleConfirm:", error);
+      router.push('/map');
+    }
+  };
 
   const handleRetake = () => {
-    // Clear captured image and close modal
     setCapturedImage(null);
     setShowConfirmModal(false);
   };
@@ -286,6 +254,40 @@ const handleConfirm = async () => {
   const toggleCameraFacing = () => {
     setFacing(prev => prev === 'back' ? 'front' : 'back');
   };
+
+  const handleCancel = () => {
+    router.push('/map');
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.loadingContainer]}>
+        <ActivityIndicator size="large" color="#60a5fa" />
+        <Text style={styles.loadingText}>Initializing camera...</Text>
+      </View>
+    );
+  }
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.webMessage}>
+          Camera features are not available on web. Please use a mobile device.
+        </Text>
+      </View>
+    );
+  }
+
+  if (!permission?.granted) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.message}>We need your permission to show the camera</Text>
+        <TouchableOpacity style={styles.button} onPress={requestPermission}>
+          <Text style={styles.buttonText}>Grant Permission</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -326,11 +328,11 @@ const handleConfirm = async () => {
           </View>
 
           {/* Purpose indicator */}
-          {markerId && (
+          {markerType && (
             <View style={styles.purposeContainer}>
               <Text style={styles.purposeText}>
                 {markerType === 'center' ? 'Center Pole Image' : 
-                 markerType === 'branch' ? `Branch ${branchIndex + 1} Image` : 
+                 markerType === 'branch' ? `Branch ${branchIndex !== undefined ? branchIndex + 1 : ''} Image` : 
                  'Capture Image'}
               </Text>
             </View>
@@ -363,7 +365,7 @@ const handleConfirm = async () => {
 
             <TouchableOpacity 
               style={styles.backButton}
-              onPress={() => navigation?.goBack()}
+              onPress={handleCancel}
             >
               <Text style={styles.backButtonText}>Cancel</Text>
             </TouchableOpacity>
@@ -409,6 +411,14 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#1a1b1e',
+  },
+  loadingContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 20,
   },
   camera: {
     flex: 1,
@@ -512,7 +522,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
   },
-  // Confirmation modal styles
   confirmModalContainer: {
     flex: 1,
     justifyContent: 'center',

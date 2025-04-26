@@ -16,13 +16,23 @@ export default function TabLayout() {
         },
         headerTintColor: '#fff',
       }}>
+
+<Tabs.Screen
+        name="map"
+        options={{
+          title: 'Map',
+          tabBarIcon: ({ size, color }) => <Map size={size} color={color} />,
+        }}
+      />
+
       <Tabs.Screen
-        name="index"
+        name="camera"
         options={{
           title: 'Survey',
           tabBarIcon: ({ size, color }) => <Camera size={size} color={color} />,
         }}
       />
+      
       <Tabs.Screen
         name="compass"
         options={{
@@ -30,13 +40,7 @@ export default function TabLayout() {
           tabBarIcon: ({ size, color }) => <Compass size={size} color={color} />,
         }}
       />
-      <Tabs.Screen
-        name="map"
-        options={{
-          title: 'Map',
-          tabBarIcon: ({ size, color }) => <Map size={size} color={color} />,
-        }}
-      />
+      
       <Tabs.Screen
         name="gallery"
         options={{
