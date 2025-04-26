@@ -3,8 +3,9 @@ import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, PermissionsAndroid, Platform, TouchableOpacity, Modal, Image, Alert, TextInput, ScrollView } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
-import * as ImagePicker from 'expo-image-picker';
 import { MaterialIcons, FontAwesome, Ionicons } from '@expo/vector-icons';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import type { CapturedImageData } from './camera';
 
 // Patch for crypto.getRandomValues
 import 'react-native-get-random-values';
@@ -39,12 +40,33 @@ const MapScreen = () => {
   const [editingMode, setEditingMode] = useState(false);
   const [markers, setMarkers] = useState<MarkerData[]>([]);
   const [selectedMarker, setSelectedMarker] = useState<MarkerData | null>(null);
-  const [imageModalVisible, setImageModalVisible] = useState(false);
   const [centerImage, setCenterImage] = useState<string | undefined>(undefined);
   const [branchImages, setBranchImages] = useState<string[]>([]);
   const [branchCount, setBranchCount] = useState(0);
+  const [imageModalVisible, setImageModalVisible] = useState(false);
+
   const [temporaryMarker, setTemporaryMarker] = useState<{latitude: number, longitude: number} | null>(null);
   const mapRef = useRef<MapView | null>(null);
+
+  const router = useRouter();
+  const params = useLocalSearchParams();
+  const capturedImageData = params.capturedImage ? JSON.parse(params.capturedImage as string) as CapturedImageData : undefined;
+
+  useEffect(() => {
+    if (capturedImageData) {
+      // Handle the captured image data from camera screen
+      if (params.markerType === 'center') {
+        setCenterImage(capturedImageData.uri);
+        setImageModalVisible(true);
+      } else if (params.markerType === 'branch' && params.branchIndex) {
+        const index = parseInt(params.branchIndex as string);
+        const newBranchImages = [...branchImages];
+        newBranchImages[index] = capturedImageData.uri;
+        setBranchImages(newBranchImages);
+        setImageModalVisible(true);
+      }
+    }
+  }, [capturedImageData, params.markerType, params.branchIndex]);
 
   useEffect(() => {
     (async () => {
@@ -94,11 +116,19 @@ const MapScreen = () => {
   };
 
   const handleMarkerPress = (marker: MarkerData) => {
-    if (editingMode) {
-      setSelectedMarker(marker);
+    setSelectedMarker(marker);
+    
+    if (!editingMode) {
+      // In view mode, show the image modal with existing images
+      setCenterImage(marker.centerImage);
+      setBranchImages(marker.branchImages || []);
+      setBranchCount(marker.branchCount || 0);
+      setImageModalVisible(true);
+    } else {
+      // In editing mode, ask about adding next pole
       Alert.alert(
         'Add Next Pole',
-        `Do you want to add the next pole after this one?`,
+        'Do you want to add the next pole after this one?',
         [
           {
             text: 'Cancel',
@@ -141,6 +171,7 @@ const MapScreen = () => {
     }
   };
 
+  // Update the saveMarker function to properly handle the images
   const saveMarker = () => {
     if (!selectedMarker || !temporaryMarker || !centerImage) return;
 
@@ -165,48 +196,34 @@ const MapScreen = () => {
     });
 
     setMarkers([...updatedMarkers, newMarker]);
-    setCenterImage(undefined);
-    setBranchImages([]);
-    setBranchCount(0);
     setImageModalVisible(false);
     setSelectedMarker(newMarker); // Auto-select the new marker for continuing
     setTemporaryMarker(null);
+    // Clear image states
+    setCenterImage(undefined);
+    setBranchImages([]);
+    setBranchCount(0);
   };
 
-  const pickCenterImage = async () => {
-    try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 1,
-      });
-
-      if (!result.canceled) {
-        setCenterImage(result.assets[0].uri);
+  const pickCenterImage = () => {
+    router.push({
+      pathname: '/camera',
+      params: {
+        markerType: 'center',
+        returnToModal: 'true'
       }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
+    });
   };
 
-  const pickBranchImage = async (index: number) => {
-    try {
-      let result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 1,
-      });
-
-      if (!result.canceled) {
-        const newBranchImages = [...branchImages];
-        newBranchImages[index] = result.assets[0].uri;
-        setBranchImages(newBranchImages);
+  const pickBranchImage = (index: number) => {
+    router.push({
+      pathname: '/camera',
+      params: {
+        markerType: 'branch',
+        branchIndex: index.toString(),
+        returnToModal: 'true'
       }
-    } catch (error) {
-      console.error('Error picking image:', error);
-    }
+    });
   };
 
   const handleBranchCountChange = (text: string) => {
@@ -225,7 +242,7 @@ const MapScreen = () => {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         latitudeDelta: 0.001, // set zoom level
-        longitudeDelta: 0.001,
+        longitudeDelta: 0.0001,
       });
     }
   };
@@ -240,20 +257,21 @@ const MapScreen = () => {
           initialRegion={{
             latitude: location.coords.latitude,
             longitude: location.coords.longitude,
-            latitudeDelta: 0.005, // More zoomed in
-            longitudeDelta: 0.005,
+            latitudeDelta: 0.002,
+            longitudeDelta: 0.002,
           }}
-          showsUserLocation={false} // We're using our own marker
+          showsUserLocation={false}
           onPress={handleMapPress}
         >
+          {/* Render all markers regardless of editing mode */}
           {markers.map(marker => (
             <Marker
               key={marker.id}
               coordinate={marker.coordinate}
               pinColor={
                 marker.isCurrentLocation ? '#4285F4' : 
-                selectedMarker?.id === marker.id ? '#FF7043' : 
-                marker.status === 'complete' ? '#4CAF50' : '#FFEB3B' // Green for complete, Yellow for incomplete
+                marker.id === selectedMarker?.id ? '#FF7043' : 
+                marker.status === 'complete' ? '#4CAF50' : '#FFEB3B'
               }
               onPress={() => handleMarkerPress(marker)}
             >
@@ -265,7 +283,8 @@ const MapScreen = () => {
             </Marker>
           ))}
           
-          {temporaryMarker && (
+          {/* Only show temporary marker in editing mode */}
+          {editingMode && temporaryMarker && (
             <Marker
               coordinate={temporaryMarker}
               pinColor="#FF7043"
@@ -543,6 +562,7 @@ const styles = StyleSheet.create({
   imagePreview: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
   },
   checkmark: {
     position: 'absolute',
@@ -599,6 +619,7 @@ const styles = StyleSheet.create({
   branchImagePreview: {
     width: '100%',
     height: '100%',
+    resizeMode: 'cover',
   },
   branchCheckmark: {
     position: 'absolute',
