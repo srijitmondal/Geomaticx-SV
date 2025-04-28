@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { StyleSheet, View, Text, TouchableOpacity, Platform } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
@@ -6,66 +6,277 @@ import { Accelerometer, Magnetometer } from 'expo-sensors';
 import { Camera as CameraIcon, Crosshair } from 'lucide-react-native';
 import { captureImageWithMetadata, ImageCaptureError } from '@/utils/imageCapture';
 
-interface SensorData {
+// Define types for better integration
+export interface SensorData {
   compass: number;
   pitch: number;
   roll: number;
 }
 
-interface LocationData {
+export interface LocationData {
   latitude: number;
   longitude: number;
   altitude: number | null;
   accuracy: number;
 }
 
-export default function SurveyScreen() {
-  const cameraRef = useRef(null);
-  const [facing, setFacing] = useState<CameraType>('back');
-  const [permission, requestPermission] = useCameraPermissions();
-  const [locationPermission, requestLocationPermission] = Location.useForegroundPermissions();
-  const [sensorData, setSensorData] = useState<SensorData>({
-    compass: 0,
-    pitch: 0,
-    roll: 0,
-  });
-  const [location, setLocation] = useState<LocationData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [capturing, setCapturing] = useState(false);
+export interface CaptureResult {
+  uri: string;
+  location: LocationData | null;
+  sensorData: SensorData;
+  timestamp: number;
+}
 
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      return;
-    }
+// Define a ref type for external control
+export interface CameraRef {
+  capture: () => Promise<CaptureResult>;
+  getCurrentLocation: () => LocationData | null;
+  getCurrentSensorData: () => SensorData;
+}
 
-    const subscribeToSensors = async () => {
-      Accelerometer.setUpdateInterval(100);
-      Magnetometer.setUpdateInterval(100);
+interface CameraProps {
+  onCapture?: (result: CaptureResult) => void;
+  onLocationUpdate?: (location: LocationData) => void;
+  onError?: (error: string) => void;
+  initialLocation?: LocationData;
+  showOverlay?: boolean;
+}
 
-      const accelerometerSubscription = Accelerometer.addListener(data => {
-        const pitch = Math.atan2(-data.x, Math.sqrt(data.y * data.y + data.z * data.z)) * (180 / Math.PI);
-        const roll = Math.atan2(data.y, data.z) * (180 / Math.PI);
-        setSensorData(prev => ({ ...prev, pitch, roll }));
-      });
+export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
+  ({ onCapture, onLocationUpdate, onError, initialLocation, showOverlay = true }, ref) => {
+    const cameraRef = useRef(null);
+    const [facing, setFacing] = useState<CameraType>('back');
+    const [permission, requestPermission] = useCameraPermissions();
+    const [locationPermission, requestLocationPermission] = Location.useForegroundPermissions();
+    const [sensorData, setSensorData] = useState<SensorData>({
+      compass: 0,
+      pitch: 0,
+      roll: 0,
+    });
+    const [location, setLocation] = useState<LocationData | null>(initialLocation || null);
+    const [error, setError] = useState<string | null>(null);
+    const [capturing, setCapturing] = useState(false);
 
-      const magnetometerSubscription = Magnetometer.addListener(data => {
-        const heading = Math.atan2(data.y, data.x) * (180 / Math.PI);
-        setSensorData(prev => ({ ...prev, compass: heading }));
-      });
+    // Expose methods via ref
+    useImperativeHandle(ref, () => ({
+      capture: async () => {
+        return handleCapture();
+      },
+      getCurrentLocation: () => location,
+      getCurrentSensorData: () => sensorData,
+    }));
+
+    useEffect(() => {
+      if (Platform.OS === 'web') {
+        return;
+      }
+
+      const subscribeToSensors = async () => {
+        Accelerometer.setUpdateInterval(100);
+        Magnetometer.setUpdateInterval(100);
+
+        const accelerometerSubscription = Accelerometer.addListener(data => {
+          const pitch = Math.atan2(-data.x, Math.sqrt(data.y * data.y + data.z * data.z)) * (180 / Math.PI);
+          const roll = Math.atan2(data.y, data.z) * (180 / Math.PI);
+          setSensorData(prev => ({ ...prev, pitch, roll }));
+        });
+
+        const magnetometerSubscription = Magnetometer.addListener(data => {
+          const heading = Math.atan2(data.y, data.x) * (180 / Math.PI);
+          setSensorData(prev => ({ ...prev, compass: heading }));
+        });
+
+        return () => {
+          accelerometerSubscription.remove();
+          magnetometerSubscription.remove();
+        };
+      };
+
+      subscribeToSensors();
+    }, []);
+
+    useEffect(() => {
+      if (Platform.OS === 'web') {
+        return;
+      }
+
+      const getLocation = async () => {
+        if (!locationPermission?.granted) {
+          const permission = await requestLocationPermission();
+          if (!permission.granted) return;
+        }
+
+        // Configure for highest accuracy
+        await Location.enableNetworkProviderAsync();
+        
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.BestForNavigation,
+          mayShowUserSettingsDialog: true, // Prompt user to enable high accuracy mode
+        });
+
+        const locationData = {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          altitude: location.coords.altitude,
+          accuracy: location.coords.accuracy ?? 0,
+        };
+
+        setLocation(locationData);
+        if (onLocationUpdate) onLocationUpdate(locationData);
+      };
+
+      const locationSubscription = Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.BestForNavigation,
+          timeInterval: 1000,
+          distanceInterval: 0.1, // Update every 0.1 meters for higher precision
+        },
+        location => {
+          const locationData = {
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+            altitude: location.coords.altitude,
+            accuracy: location.coords.accuracy ?? 0,
+          };
+          
+          setLocation(locationData);
+          if (onLocationUpdate) onLocationUpdate(locationData);
+        }
+      );
+
+      getLocation();
 
       return () => {
-        accelerometerSubscription.remove();
-        magnetometerSubscription.remove();
+        locationSubscription.then(sub => sub.remove());
       };
+    }, [locationPermission, onLocationUpdate]);
+
+    const handleCapture = async (): Promise<CaptureResult> => {
+      if (Platform.OS === 'web' || capturing) {
+        throw new Error('Cannot capture on web or while already capturing');
+      }
+
+      try {
+        setCapturing(true);
+        setError(null);
+
+        const result = await captureImageWithMetadata(cameraRef);
+        
+        const captureResult = {
+          uri: result.uri,
+          location,
+          sensorData,
+          timestamp: Date.now(),
+        };
+        
+        if (onCapture) onCapture(captureResult);
+        return captureResult;
+        
+      } catch (error) {
+        const errorMessage = error instanceof ImageCaptureError 
+          ? error.message 
+          : 'Failed to capture image';
+        
+        setError(errorMessage);
+        if (onError) onError(errorMessage);
+        console.error('Capture error:', error);
+        throw error;
+      } finally {
+        setCapturing(false);
+      }
     };
 
-    subscribeToSensors();
-  }, []);
+    if (Platform.OS === 'web') {
+      return (
+        <View style={styles.container}>
+          <Text style={styles.webMessage}>
+            Camera and sensor features are not available on web. Please use a mobile device.
+          </Text>
+        </View>
+      );
+    }
+
+    if (!permission?.granted) {
+      return (
+        <View style={styles.container}>
+          <Text style={styles.message}>We need your permission to show the camera</Text>
+          <TouchableOpacity style={styles.button} onPress={requestPermission}>
+            <Text style={styles.buttonText}>Grant Permission</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    return (
+      <View style={styles.container}>
+        <CameraView 
+          ref={cameraRef}
+          style={styles.camera} 
+          type={facing}
+        >
+          {showOverlay && (
+            <View style={styles.overlay}>
+              <Crosshair color="#60a5fa" size={48} />
+              
+              <View style={styles.infoContainer}>
+                <Text style={styles.infoText}>
+                  Heading: {sensorData.compass.toFixed(1)}°
+                </Text>
+                <Text style={styles.infoText}>
+                  Pitch: {sensorData.pitch.toFixed(1)}°
+                </Text>
+                <Text style={styles.infoText}>
+                  Roll: {sensorData.roll.toFixed(1)}°
+                </Text>
+                {location && (
+                  <>
+                    <Text style={styles.infoText}>
+                      Lat: {location.latitude.toFixed(6)}
+                    </Text>
+                    <Text style={styles.infoText}>
+                      Lon: {location.longitude.toFixed(6)}
+                    </Text>
+                    <Text style={styles.infoText}>
+                      Alt: {location.altitude?.toFixed(1)}m
+                    </Text>
+                    <Text style={styles.infoText}>
+                      Accuracy: ±{location.accuracy.toFixed(1)}m
+                    </Text>
+                  </>
+                )}
+              </View>
+
+              {error && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{error}</Text>
+                </View>
+              )}
+
+              <TouchableOpacity 
+                style={[
+                  styles.captureButton,
+                  capturing && styles.captureButtonDisabled
+                ]} 
+                onPress={() => handleCapture()}
+                disabled={capturing}
+              >
+                <CameraIcon color="#fff" size={32} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </CameraView>
+      </View>
+    );
+  }
+);
+
+// Create a hook to use location and sensor data separately
+export function useSurveyLocationData() {
+  const [locationPermission, requestLocationPermission] = Location.useForegroundPermissions();
+  const [location, setLocation] = useState<LocationData | null>(null);
 
   useEffect(() => {
-    if (Platform.OS === 'web') {
-      return;
-    }
+    if (Platform.OS === 'web') return;
 
     const getLocation = async () => {
       if (!locationPermission?.granted) {
@@ -73,12 +284,11 @@ export default function SurveyScreen() {
         if (!permission.granted) return;
       }
 
-      // Configure for highest accuracy
       await Location.enableNetworkProviderAsync();
       
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.BestForNavigation,
-        mayShowUserSettingsDialog: true, // Prompt user to enable high accuracy mode
+        mayShowUserSettingsDialog: true,
       });
 
       setLocation({
@@ -93,7 +303,7 @@ export default function SurveyScreen() {
       {
         accuracy: Location.Accuracy.BestForNavigation,
         timeInterval: 1000,
-        distanceInterval: 0.1, // Update every 0.1 meters for higher precision
+        distanceInterval: 0.1,
       },
       location => {
         setLocation({
@@ -112,107 +322,11 @@ export default function SurveyScreen() {
     };
   }, [locationPermission]);
 
-  if (Platform.OS === 'web') {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.webMessage}>
-          Camera and sensor features are not available on web. Please use a mobile device.
-        </Text>
-      </View>
-    );
-  }
-
-  if (!permission?.granted) {
-    return (
-      <View style={styles.container}>
-        <Text style={styles.message}>We need your permission to show the camera</Text>
-        <TouchableOpacity style={styles.button} onPress={requestPermission}>
-          <Text style={styles.buttonText}>Grant Permission</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  const handleCapture = async () => {
-    if (Platform.OS === 'web' || capturing) return;
-
-    try {
-      setCapturing(true);
-      setError(null);
-
-      const result = await captureImageWithMetadata(cameraRef);
-      console.log('Photo captured successfully:', result.uri);
-      
-    } catch (error) {
-      if (error instanceof ImageCaptureError) {
-        setError(error.message);
-      } else {
-        setError('Failed to capture image');
-      }
-      console.error('Capture error:', error);
-    } finally {
-      setCapturing(false);
-    }
+  return {
+    location,
+    requestLocationPermission,
+    hasPermission: !!locationPermission?.granted
   };
-
-  return (
-    <View style={styles.container}>
-      <CameraView 
-        ref={cameraRef}
-        style={styles.camera} 
-        type={facing}
-      >
-        <View style={styles.overlay}>
-          <Crosshair color="#60a5fa" size={48} />
-          
-          <View style={styles.infoContainer}>
-            <Text style={styles.infoText}>
-              Heading: {sensorData.compass.toFixed(1)}°
-            </Text>
-            <Text style={styles.infoText}>
-              Pitch: {sensorData.pitch.toFixed(1)}°
-            </Text>
-            <Text style={styles.infoText}>
-              Roll: {sensorData.roll.toFixed(1)}°
-            </Text>
-            {location && (
-              <>
-                <Text style={styles.infoText}>
-                  Lat: {location.latitude.toFixed(6)}
-                </Text>
-                <Text style={styles.infoText}>
-                  Lon: {location.longitude.toFixed(6)}
-                </Text>
-                <Text style={styles.infoText}>
-                  Alt: {location.altitude?.toFixed(1)}m
-                </Text>
-                <Text style={styles.infoText}>
-                  Accuracy: ±{location.accuracy.toFixed(1)}m
-                </Text>
-              </>
-            )}
-          </View>
-
-          {error && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
-
-          <TouchableOpacity 
-            style={[
-              styles.captureButton,
-              capturing && styles.captureButtonDisabled
-            ]} 
-            onPress={handleCapture}
-            disabled={capturing}
-          >
-            <CameraIcon color="#fff" size={32} />
-          </TouchableOpacity>
-        </View>
-      </CameraView>
-    </View>
-  );
 }
 
 const styles = StyleSheet.create({
