@@ -15,6 +15,7 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SurveyCameraView, CameraRef, LocationData, SensorData } from './camera';
 
 interface MarkerData {
   id: number;
@@ -28,6 +29,13 @@ interface MarkerData {
   isComplete: boolean;
 }
 
+interface CaptureResult {
+  uri: string;
+  location: LocationData | null;
+  sensorData: SensorData;
+  timestamp: number;
+}
+
 const STORAGE_KEY = 'map_markers';
 
 const Map = () => {
@@ -39,14 +47,18 @@ const Map = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const mapRef = useRef<MapView | null>(null);
+  const cameraRef = useRef<CameraRef>(null);
   const [completedCount, setCompletedCount] = useState(0);
   const [incompleteCount, setIncompleteCount] = useState(0);
   const [deleteConfirmVisible, setDeleteConfirmVisible] = useState(false);
   const [selectedConnectionIndex, setSelectedConnectionIndex] = useState(-1);
   const [connectionDeleteConfirmVisible, setConnectionDeleteConfirmVisible] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [currentCaptureTarget, setCurrentCaptureTarget] = useState<'centerPoll' | number>('centerPoll');
 
   // Load markers from AsyncStorage on component mount
   useEffect(() => {
+     clearStorageOnce(); //for remove previous data
     loadMarkers();
   }, []);
 
@@ -70,7 +82,16 @@ const Map = () => {
     }
   };
 
-  //for temporary perpurpose
+  //temporary function to remove previous data
+  const clearStorageOnce = async () => {
+    try {
+      await AsyncStorage.removeItem('map_markers');
+      console.log('✅ Cleared saved markers!');
+    } catch (error) {
+      console.error('❌ Failed to clear markers', error);
+    }
+  };
+  
 
   const saveMarkers = async (markersToSave: MarkerData[]) => {
     try {
@@ -157,6 +178,129 @@ const Map = () => {
       // Hide dropdown after selection
       setDropdownVisible(false);
     }
+  };
+
+  // Camera capture handlers
+  const handleCameraCapture = (result: CaptureResult) => {
+    if (selectedMarker) {
+      let updatedMarkers;
+
+      if (currentCaptureTarget === 'centerPoll') {
+        updatedMarkers = markers.map(marker => {
+          if (marker.id === selectedMarker.id) {
+            // Check if all required images are uploaded
+            const updatedMarker = {
+              ...marker,
+              centerPollImage: result.uri
+            };
+            
+            const isComplete = 
+              Boolean(updatedMarker.centerPollImage) && 
+              updatedMarker.connectionImages.length >= updatedMarker.connectionCount;
+              
+            return {
+              ...updatedMarker,
+              isComplete
+            };
+          }
+          return marker;
+        });
+      } else {
+        // It's a connection image (index is stored in currentCaptureTarget)
+        const connectionIndex = currentCaptureTarget as number;
+        
+        // First get a copy of the current marker
+        const markerToUpdate = markers.find(m => m.id === selectedMarker.id);
+        
+        if (markerToUpdate) {
+          // Create a copy of the images array
+          const updatedImages = [...markerToUpdate.connectionImages];
+          
+          // If this is a specific index update, make sure the array has enough elements
+          while (updatedImages.length <= connectionIndex) {
+            updatedImages.push("");
+          }
+          
+          // Set the image at the specific index
+          updatedImages[connectionIndex] = result.uri;
+          
+          // Remove empty strings
+          const cleanedImages = updatedImages.filter(img => img !== "");
+          
+          updatedMarkers = markers.map(marker => {
+            if (marker.id === selectedMarker.id) {
+              // Check if all required images are uploaded
+              const isComplete = 
+                Boolean(marker.centerPollImage) && 
+                cleanedImages.length >= marker.connectionCount;
+                
+              return {
+                ...marker,
+                connectionImages: cleanedImages,
+                isComplete
+              };
+            }
+            return marker;
+          });
+        } else {
+          updatedMarkers = [...markers];
+        }
+      }
+
+      setMarkers(updatedMarkers);
+      saveMarkers(updatedMarkers);
+
+      // Update the selected marker
+      const updatedMarker = updatedMarkers.find(m => m.id === selectedMarker.id);
+      if (updatedMarker) {
+        setSelectedMarker(updatedMarker);
+      }
+    }
+    
+    setShowCamera(false);
+  };
+
+  const openCameraForCenterPoll = () => {
+    setCurrentCaptureTarget('centerPoll');
+    setShowCamera(true);
+  };
+
+  const openCameraForConnection = (index: number) => {
+    setCurrentCaptureTarget(index);
+    setShowCamera(true);
+  };
+
+  const openGalleryOrCameraPrompt = (target: 'centerPoll' | number) => {
+    Alert.alert(
+      "Choose an option",
+      "Would you like to take a photo or choose from gallery?",
+      [
+        {
+          text: "Take Photo",
+          onPress: () => {
+            if (target === 'centerPoll') {
+              openCameraForCenterPoll();
+            } else {
+              openCameraForConnection(target as number);
+            }
+          }
+        },
+        {
+          text: "Choose from Gallery",
+          onPress: () => {
+            if (target === 'centerPoll') {
+              pickCenterPollImage();
+            } else {
+              pickConnectionImage(target as number);
+            }
+          }
+        },
+        {
+          text: "Cancel",
+          style: "cancel"
+        }
+      ]
+    );
   };
 
   const pickCenterPollImage = async () => {
@@ -323,6 +467,18 @@ const Map = () => {
     setEditingMode(!editingMode);
   };
 
+  // Convert location object to LocationData format needed by camera
+  const getCurrentLocationData = (): LocationData | null => {
+    if (!location) return null;
+    
+    return {
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      altitude: location.coords.altitude,
+      accuracy: location.coords.accuracy
+    };
+  };
+
   // Custom dropdown component
   const renderCustomDropdown = () => {
     if (!selectedMarker) return null;
@@ -385,7 +541,7 @@ const Map = () => {
             />
             <TouchableOpacity 
               style={styles.replaceButton}
-              onPress={pickCenterPollImage}
+              onPress={() => openGalleryOrCameraPrompt('centerPoll')}
             >
               <Text style={styles.replaceButtonText}>Replace</Text>
             </TouchableOpacity>
@@ -393,7 +549,7 @@ const Map = () => {
         ) : (
           <TouchableOpacity
             style={[styles.uploadButton, styles.centerPollUploadButton]}
-            onPress={pickCenterPollImage}
+            onPress={() => openGalleryOrCameraPrompt('centerPoll')}
           >
             <FontAwesome name="camera" size={30} color="#666" />
             <Text style={styles.uploadText}>
@@ -435,7 +591,7 @@ const Map = () => {
               />
               <TouchableOpacity 
                 style={styles.replaceButton}
-                onPress={() => pickConnectionImage(i)}
+                onPress={() => openGalleryOrCameraPrompt(i)}
               >
                 <Text style={styles.replaceButtonText}>Replace</Text>
               </TouchableOpacity>
@@ -443,7 +599,7 @@ const Map = () => {
           ) : (
             <TouchableOpacity
               style={styles.uploadButton}
-              onPress={() => pickConnectionImage(i)}
+              onPress={() => openGalleryOrCameraPrompt(i)}
             >
               <FontAwesome name="camera" size={30} color="#666" />
               <Text style={styles.uploadText}>
@@ -466,55 +622,70 @@ const Map = () => {
         </View>
       ) : (
         <>
-          <MapView
-            ref={mapRef}
-            style={styles.map}
-            mapType="satellite"
-            showsUserLocation
-            showsMyLocationButton
-            onPress={handleMapPress}
-          >
-            {markers.map((marker) => (
-              <Marker
-                key={`${marker.id}-${marker.isComplete}`}
-                coordinate={marker.coordinate}
-                pinColor={marker.isComplete ? "green" : "yellow"}
-                onPress={() => handleMarkerPress(marker)}
-              />
-            ))}
-          </MapView>
-
-          <TouchableOpacity
-            style={[
-              styles.editButton,
-              editingMode ? styles.editButtonActive : null,
-            ]}
-            onPress={toggleEditingMode}
-          >
-            <FontAwesome
-              name="edit"
-              size={24}
-              color={editingMode ? '#fff' : '#000'}
+          {showCamera ? (
+            <SurveyCameraView
+              ref={cameraRef}
+              onCapture={handleCameraCapture}
+              onError={(error :any) => {
+                console.error('Camera error:', error);
+                setShowCamera(false);
+              }}
+              initialLocation={getCurrentLocationData()}
+              showOverlay={true}
             />
-          </TouchableOpacity>
+          ) : (
+            <>
+              <MapView
+                ref={mapRef}
+                style={styles.map}
+                mapType="satellite"
+                showsUserLocation
+                showsMyLocationButton
+                onPress={handleMapPress}
+              >
+                {markers.map((marker) => (
+                  <Marker
+                    key={`${marker.id}-${marker.isComplete}`}
+                    coordinate={marker.coordinate}
+                    pinColor={marker.isComplete ? "green" : "yellow"}
+                    onPress={() => handleMarkerPress(marker)}
+                  />
+                ))}
+              </MapView>
 
-          {/* Status bar for marker counts */}
-          <View style={styles.statusBar}>
-            <View style={styles.statusItem}>
-              <View style={[styles.statusIndicator, styles.completedIndicator]} />
-              <Text style={styles.statusText}>Completed: {completedCount}</Text>
-            </View>
-            <View style={styles.statusItem}>
-              <View style={[styles.statusIndicator, styles.incompleteIndicator]} />
-              <Text style={styles.statusText}>Incomplete: {incompleteCount}</Text>
-            </View>
-          </View>
+              <TouchableOpacity
+                style={[
+                  styles.editButton,
+                  editingMode ? styles.editButtonActive : null,
+                ]}
+                onPress={toggleEditingMode}
+              >
+                <FontAwesome
+                  name="edit"
+                  size={24}
+                  color={editingMode ? '#fff' : '#000'}
+                />
+              </TouchableOpacity>
+
+              {/* Status bar for marker counts */}
+              <View style={styles.statusBar}>
+                <View style={styles.statusItem}>
+                  <View style={[styles.statusIndicator, styles.completedIndicator]} />
+                  <Text style={styles.statusText}>Completed: {completedCount}</Text>
+                </View>
+                <View style={styles.statusItem}>
+                  <View style={[styles.statusIndicator, styles.incompleteIndicator]} />
+                  <Text style={styles.statusText}>Incomplete: {incompleteCount}</Text>
+                </View>
+              </View>
+            </>
+          )}
 
           {/* Main Modal */}
           <Modal
             animationType="slide"
             transparent={true}
-            visible={modalVisible}
+            visible={modalVisible && !showCamera}
             onRequestClose={() => setModalVisible(false)}
           >
             <View style={styles.modalOverlay}>
