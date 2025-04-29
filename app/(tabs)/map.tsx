@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View,
   StyleSheet,
@@ -46,7 +46,7 @@ const Map = () => {
   const [selectedMarker, setSelectedMarker] = useState<MarkerData | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
-  const mapRef = useRef<MapView | null>(null);
+  const mapRef = useRef<MapView>(null);
   const cameraRef = useRef<CameraRef>(null);
   const [completedCount, setCompletedCount] = useState(0);
   const [incompleteCount, setIncompleteCount] = useState(0);
@@ -56,21 +56,36 @@ const Map = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [currentCaptureTarget, setCurrentCaptureTarget] = useState<'centerPoll' | number>('centerPoll');
 
+
+  const currentLocation = useMemo(() => {
+    if (!location) return null;
+    return {
+      latitude: location.coords.latitude,
+      longitude: location.coords.longitude,
+      latitudeDelta: 0.0005,
+      longitudeDelta: 0.0005
+    };
+  }, [location?.coords.latitude, location?.coords.longitude]);
+
+  // Memoized marker counts
+  const markerCounts = useMemo(() => {
+    const complete = markers.filter(marker => marker.isComplete).length;
+    const incomplete = markers.length - complete;
+    return { complete, incomplete };
+  }, [markers]);
+
+  useEffect(() => {
+    setCompletedCount(markerCounts.complete);
+    setIncompleteCount(markerCounts.incomplete);
+  }, [markerCounts]);
+
   // Load markers from AsyncStorage on component mount
   useEffect(() => {
-    //  clearStorageOnce(); //for remove previous data
+    // clearStorageOnce();
     loadMarkers();
   }, []);
 
   // Update marker counts whenever markers change
-  useEffect(() => {
-    const complete = markers.filter(marker => marker.isComplete).length;
-    const incomplete = markers.length - complete;
-    
-    setCompletedCount(complete);
-    setIncompleteCount(incomplete);
-  }, [markers]);
-
   const loadMarkers = async () => {
     try {
       const storedMarkers = await AsyncStorage.getItem(STORAGE_KEY);
@@ -126,28 +141,42 @@ const Map = () => {
     })();
   }, []);
 
-  const handleMapPress = (event: any) => {
+  const handleMapPress = useCallback((event: any) => {
     if (!editingMode) return;
 
     const newMarker: MarkerData = {
-      id: Date.now(), // Use timestamp for more unique IDs
+      id: Date.now(),
       coordinate: event.nativeEvent.coordinate,
-      centerPollImage: null, // Initially null
+      centerPollImage: null,
       connectionImages: [],
-      connectionCount: 1, // Default connection count
+      connectionCount: 1,
       isComplete: false,
     };
 
     const updatedMarkers = [...markers, newMarker];
     setMarkers(updatedMarkers);
     saveMarkers(updatedMarkers);
-  };
+  }, [editingMode, markers]);
 
-  const handleMarkerPress = (marker: MarkerData) => {
+  const handleMarkerPress = useCallback((marker: MarkerData) => {
     setSelectedMarker(marker);
     setModalVisible(true);
-  };
+  }, []);
 
+  const handleModalClose = useCallback(() => {
+    setModalVisible(false);
+  }, []);
+
+  const renderedMarkers = useMemo(() => (
+    markers.map(marker => (
+      <Marker
+        key={`${marker.id}-${marker.isComplete}`}
+        coordinate={marker.coordinate}
+        pinColor={marker.isComplete ? "green" : "yellow"}
+        onPress={() => handleMarkerPress(marker)}
+      />
+    ))
+  ), [markers, handleMarkerPress]);
   const handleConnectionCountChange = (connectionCount: number) => {
     if (selectedMarker) {
       const updatedMarkers = markers.map(marker => {
@@ -642,15 +671,9 @@ const Map = () => {
                 showsUserLocation
                 showsMyLocationButton
                 onPress={handleMapPress}
+                initialRegion={currentLocation}
               >
-                {markers.map((marker) => (
-                  <Marker
-                    key={`${marker.id}-${marker.isComplete}`}
-                    coordinate={marker.coordinate}
-                    pinColor={marker.isComplete ? "green" : "yellow"}
-                    onPress={() => handleMarkerPress(marker)}
-                  />
-                ))}
+               {renderedMarkers}
               </MapView>
 
               <TouchableOpacity
@@ -686,7 +709,7 @@ const Map = () => {
             animationType="slide"
             transparent={true}
             visible={modalVisible && !showCamera}
-            onRequestClose={() => setModalVisible(false)}
+            onRequestClose={handleModalClose}
           >
             <View style={styles.modalOverlay}>
               <View style={styles.modalContent}>
@@ -1148,4 +1171,4 @@ const styles = StyleSheet.create({
   },
 });
 
-export default Map;
+export default React.memo(Map);
