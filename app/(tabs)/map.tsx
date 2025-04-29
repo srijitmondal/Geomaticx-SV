@@ -58,7 +58,7 @@ const Map = () => {
 
   // Load markers from AsyncStorage on component mount
   useEffect(() => {
-     clearStorageOnce(); //for remove previous data
+    //  clearStorageOnce(); //for remove previous data
     loadMarkers();
   }, []);
 
@@ -83,14 +83,14 @@ const Map = () => {
   };
 
   //temporary function to remove previous data
-  const clearStorageOnce = async () => {
-    try {
-      await AsyncStorage.removeItem('map_markers');
-      console.log('✅ Cleared saved markers!');
-    } catch (error) {
-      console.error('❌ Failed to clear markers', error);
-    }
-  };
+  // const clearStorageOnce = async () => {
+  //   try {
+  //     await AsyncStorage.removeItem('map_markers');
+  //     console.log('✅ Cleared saved markers!');
+  //   } catch (error) {
+  //     console.error('❌ Failed to clear markers', error);
+  //   }
+  // };
   
 
   const saveMarkers = async (markersToSave: MarkerData[]) => {
