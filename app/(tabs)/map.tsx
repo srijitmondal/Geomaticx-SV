@@ -9,6 +9,7 @@ import {
   Platform,
   Alert,
   ScrollView,
+  ActivityIndicator
 } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
@@ -55,6 +56,7 @@ const Map = () => {
   const [connectionDeleteConfirmVisible, setConnectionDeleteConfirmVisible] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [currentCaptureTarget, setCurrentCaptureTarget] = useState<'centerPoll' | number>('centerPoll');
+  const [isLoading, setIsLoading] = useState(true);
 
 
   const currentLocation = useMemo(() => {
@@ -121,22 +123,30 @@ const Map = () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         setErrorMsg('Permission to access location was denied');
+        setIsLoading(false);
         return;
       }
 
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
-      setLocation(currentLocation);
-
-      // Zoom to max possible level at user's current location
-      if (mapRef.current && currentLocation) {
-        mapRef.current.animateToRegion({
-          latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude,
-          latitudeDelta: 0.0005, // Very zoomed in (close to max possible)
-          longitudeDelta: 0.0005,
+      try {
+        const currentLocation = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.High,
         });
+        setLocation(currentLocation);
+
+        // Zoom to max possible level at user's current location
+        if (mapRef.current && currentLocation) {
+          mapRef.current.animateToRegion({
+            latitude: currentLocation.coords.latitude,
+            longitude: currentLocation.coords.longitude,
+            latitudeDelta: 0.0005,
+            longitudeDelta: 0.0005,
+          });
+        }
+      } catch (error) {
+        console.error('Error getting location:', error);
+        setErrorMsg('Failed to get current location');
+      } finally {
+        setIsLoading(false);
       }
     })();
   }, []);
@@ -642,6 +652,15 @@ const Map = () => {
     
     return slots;
   };
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Getting your location...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -1168,6 +1187,17 @@ const styles = StyleSheet.create({
   },
   deleteText: {
     color: 'red',
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 10,
+    fontSize: 16,
   },
 });
 
