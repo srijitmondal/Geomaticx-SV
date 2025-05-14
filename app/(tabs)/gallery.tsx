@@ -295,12 +295,6 @@ export default function GalleryScreen() {
     return (
       <View style={styles.container}>
         <Text style={styles.emptyText}>No photos yet</Text>
-        <TouchableOpacity
-          style={styles.captureButton}
-          onPress={() => router.push('/')}
-        >
-          <Text style={styles.captureButtonText}>Take a Photo</Text>
-        </TouchableOpacity>
       </View>
     );
   }
@@ -540,19 +534,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginTop: 20,
-  },
-  captureButton: {
-    backgroundColor: '#60a5fa',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 16,
-    alignSelf: 'center',
-  },
-  captureButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
   },
   selectionHeader: {
     flexDirection: 'row',
