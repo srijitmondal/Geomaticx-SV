@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Share as ShareIcon, X, MapPin, Compass, ArrowUpDown, Trash2, CircleCheck as CheckCircle2 } from 'lucide-react-native';
+import { eventEmitter, EVENTS } from '../../utils/events';
 
 interface PhotoMetadata {
   timestamp: {
@@ -46,6 +47,17 @@ export default function GalleryScreen() {
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
   const router = useRouter();
+
+  useEffect(() => {
+    const handleSync = () => {
+      setLoading(true);
+      loadPhotos();
+    };
+    eventEmitter.on(EVENTS.GALLERY_SYNC, handleSync);
+    return () => {
+      eventEmitter.off(EVENTS.GALLERY_SYNC, handleSync);
+    };
+  }, []);
 
   const loadPhotos = async () => {
     try {

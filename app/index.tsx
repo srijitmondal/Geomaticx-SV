@@ -27,6 +27,9 @@ import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { eventEmitter, EVENTS } from '../utils/events';
 
+const API_BASE_URL = 'https://geomaticx-cam-backend.onrender.com/api';
+//const API_BASE_URL = 'http://localhost:3000';
+
 SplashScreen.preventAutoHideAsync();
 
 function LoginScreen() {
@@ -49,17 +52,15 @@ function LoginScreen() {
       SplashScreen.hideAsync();
     }
   }, [fontsLoaded]);
-
   const validateEmailOrPhone = (value: string) => {
-    const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;
-    const phoneRegex = /^[0-9]{10}$/;
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   
     if (!value) {
-      setEmailError('Email or phone number is required');
+      setEmailError('Email is required');
       return false;
     }
-    if (!emailRegex.test(value) && !phoneRegex.test(value)) {
-      setEmailError('Please enter a valid email or 10-digit phone number');
+    if (!emailRegex.test(value)) {
+      setEmailError('Please enter a valid email address');
       return false;
     }
   
@@ -82,26 +83,38 @@ function LoginScreen() {
 
   const handleLogin = async () => {
     const isEmailValid = validateEmailOrPhone(email);
-    const isPasswordValid = validatePassword(password);
-
-    if (isEmailValid && isPasswordValid) {
+    const isPasswordValid = validatePassword(password);    if (isEmailValid && isPasswordValid) {
       setLoading(true);
       try {
-        const response = await fetch('https://demo-expense.geomaticxevs.in/ET-api/login.php', {
+        const response = await fetch(`${API_BASE_URL}/users/login`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Accept': 'application/json'
           },
-          body: JSON.stringify({ u_identify: email, u_pass: password }),
+          body: JSON.stringify({ email, password }),
         });
-        const data = await response.json();
 
-        if (data.status === 'success') {
+        // First check if the response is ok
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Server error response:', errorText);
+          throw new Error(`Enter Correct Email and Password`);
+        }
+
+        // Then try to parse JSON
+        const data = await response.json();
+        console.log('Login response:', data);
+        console.log(data.token)
+        console.log(data.user)
+        if (data.token && data.data.user) {
           setLoginError('');
           await Promise.all([
-            AsyncStorage.setItem('userid', data.data.userid.toString()),
-            AsyncStorage.setItem('roleId', data.data.role_id.toString()),
-            AsyncStorage.setItem('currentLoginTime', Date.now().toString()),
+            AsyncStorage.setItem('token', data.token),
+            // AsyncStorage.setItem('userid', data.user.id.toString()),
+            // AsyncStorage.setItem('roleId', data.user.role),
+            // AsyncStorage.setItem('userName', data.user.name),
+            // AsyncStorage.setItem('currentLoginTime', Date.now().toString()),
           ]);
 
           eventEmitter.emit(EVENTS.USER_LOGIN);
@@ -110,7 +123,8 @@ function LoginScreen() {
           setLoginError(data.message || 'Invalid email or password');
         }
       } catch (error) {
-        setLoginError('Network error. Please try again.');
+        console.error('Login error:', error);
+        setLoginError(error instanceof Error ? error.message : 'Network error. Please try again.');
       } finally {
         setLoading(false);
       }
@@ -168,8 +182,7 @@ function LoginScreen() {
               ) : null}
 
               <TextInput
-                style={[styles.input, emailError && styles.inputError]}
-                placeholder="E-mail or Telephone Number"
+                style={[styles.input, emailError && styles.inputError]}                placeholder="Email Address"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"

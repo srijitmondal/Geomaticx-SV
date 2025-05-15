@@ -44,6 +44,7 @@ interface ImageMetadata {
   location: LocationData | null;
   sensors: SensorData | null;
   camera: CameraMetadata | null;
+  positionId: number;
   device: {
     platform: string;
     model: string;
@@ -60,6 +61,7 @@ export class ImageCaptureError extends Error {
 
 export async function captureImageWithMetadata(
   cameraRef: any,
+  positionId: number = 0,
   options = { quality: 1, format: SaveFormat.JPEG }
 ): Promise<{ uri: string; metadata: ImageMetadata }> {
   try {
@@ -71,7 +73,7 @@ export async function captureImageWithMetadata(
     }
 
     // Start collecting metadata before capture
-    const metadataPromise = collectMetadata();
+    const metadataPromise = collectMetadata(positionId);
 
     // Capture image in parallel with metadata collection
     const photoPromise = cameraRef.current?.takePictureAsync({
@@ -123,7 +125,7 @@ export async function captureImageWithMetadata(
   }
 }
 
-async function collectMetadata(): Promise<ImageMetadata> {
+async function collectMetadata(positionId: number = 0): Promise<ImageMetadata> {
   // Initialize sensors early
   const [magnetometerPromise, motionPromise] = await Promise.all([
     new Promise<any>((resolve) => {
@@ -152,6 +154,7 @@ async function collectMetadata(): Promise<ImageMetadata> {
     location: null,
     sensors: null,
     camera: null,
+    positionId: positionId,
     device: {
       platform: Platform.OS,
       model: Platform.select({ ios: 'iOS', android: 'Android' }) || 'unknown',

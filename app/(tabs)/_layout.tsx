@@ -1,10 +1,13 @@
 import { Tabs, router } from 'expo-router';
-import { Camera, Compass, Map, Image as ImageIcon, LogOut } from 'lucide-react-native';
-import { TouchableOpacity, Alert } from 'react-native';
+import { Camera, Compass, Map, Image as ImageIcon, LogOut, RefreshCw } from 'lucide-react-native';
+import { TouchableOpacity, Alert, ActivityIndicator, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { eventEmitter, EVENTS } from '../../utils/events';
+import { useState } from 'react';
 
 export default function TabLayout() {
+  const [syncing, setSyncing] = useState(false);
+
   const handleLogout = () => {
     Alert.alert(
       "Logout",
@@ -55,7 +58,7 @@ export default function TabLayout() {
         ),
       }}>
 
-<Tabs.Screen
+      <Tabs.Screen
         name="map"
         options={{
           title: 'Map',
@@ -84,6 +87,33 @@ export default function TabLayout() {
         options={{
           title: 'Gallery',
           tabBarIcon: ({ size, color }) => <ImageIcon size={size} color={color} />,
+          headerRight: () => (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <TouchableOpacity 
+                onPress={() => {
+                  if (!syncing) {
+                    setSyncing(true);
+                    eventEmitter.emit(EVENTS.GALLERY_SYNC);
+                    // Reset syncing state after animation
+                    setTimeout(() => setSyncing(false), 1000);
+                  }
+                }}
+                style={{ marginRight: 16 }}
+              >
+                {syncing ? (
+                  <ActivityIndicator color="#fff" size={24} />
+                ) : (
+                  <RefreshCw size={24} color="#fff" />
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity 
+                onPress={handleLogout}
+                style={{ marginRight: 16 }}
+              >
+                <LogOut size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          ),
         }}
       />
     </Tabs>
