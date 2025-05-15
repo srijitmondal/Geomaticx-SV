@@ -109,7 +109,7 @@ const Map = () => {
   //   }
   // };
   
-
+  
   const saveMarkers = async (markersToSave: MarkerData[]) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(markersToSave));
@@ -149,7 +149,7 @@ const Map = () => {
         setIsLoading(false);
       }
     })();
-  }, []);
+  }, [ [modalVisible]]);
 
   const handleMapPress = useCallback((event: any) => {
     if (!editingMode) return;
