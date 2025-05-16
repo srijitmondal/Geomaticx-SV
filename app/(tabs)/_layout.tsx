@@ -1,7 +1,6 @@
 import { Tabs } from 'expo-router';
 import { Camera, Compass, Map, Image as ImageIcon, RefreshCw, Settings } from 'lucide-react-native';
-import { TouchableOpacity, Alert, ActivityIndicator, View } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { TouchableOpacity, Alert, ActivityIndicator, View, Text } from 'react-native';
 import { eventEmitter, EVENTS } from '../../utils/events';
 import { useState } from 'react';
 
@@ -63,12 +62,18 @@ export default function TabLayout() {
                     setTimeout(() => setSyncing(false), 1000);
                   }
                 }}
-                style={{ marginRight: 16 }}
+                style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, gap: 8 }}
               >
                 {syncing ? (
-                  <ActivityIndicator color="#fff" size={24} />
+                  <>
+                    <ActivityIndicator color="#fff" size={24} />
+                    <Text style={{ color: '#fff' }}>Syncing...</Text>
+                  </>
                 ) : (
-                  <RefreshCw size={24} color="#fff" />
+                  <>
+                    <RefreshCw color="#fff" size={24} />
+                    <Text style={{ color: '#fff' }}>Sync</Text>
+                  </>
                 )}
               </TouchableOpacity>
             </View>
