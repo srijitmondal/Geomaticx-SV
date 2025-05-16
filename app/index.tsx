@@ -28,7 +28,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { eventEmitter, EVENTS } from '../utils/events';
 
 const API_BASE_URL = 'https://geomaticx-cam-backend.onrender.com/api';
-//const API_BASE_URL = 'http://localhost:3000';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -108,13 +107,10 @@ function LoginScreen() {
         console.log(data.token)
         console.log(data.user)
         if (data.token && data.data.user) {
-          setLoginError('');
-          await Promise.all([
+          setLoginError('');          await Promise.all([
             AsyncStorage.setItem('token', data.token),
-            // AsyncStorage.setItem('userid', data.user.id.toString()),
-            // AsyncStorage.setItem('roleId', data.user.role),
-            // AsyncStorage.setItem('userName', data.user.name),
-            // AsyncStorage.setItem('currentLoginTime', Date.now().toString()),
+            AsyncStorage.setItem('userName', data.data.user.name),
+            AsyncStorage.setItem('userEmail', data.data.user.email)
           ]);
 
           eventEmitter.emit(EVENTS.USER_LOGIN);

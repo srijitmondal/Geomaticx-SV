@@ -1,5 +1,5 @@
-import { Tabs, router } from 'expo-router';
-import { Camera, Compass, Map, Image as ImageIcon, LogOut, RefreshCw } from 'lucide-react-native';
+import { Tabs } from 'expo-router';
+import { Camera, Compass, Map, Image as ImageIcon, RefreshCw, Settings } from 'lucide-react-native';
 import { TouchableOpacity, Alert, ActivityIndicator, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { eventEmitter, EVENTS } from '../../utils/events';
@@ -7,33 +7,6 @@ import { useState } from 'react';
 
 export default function TabLayout() {
   const [syncing, setSyncing] = useState(false);
-
-  const handleLogout = () => {
-    Alert.alert(
-      "Logout",
-      "Are you sure you want to logout?",
-      [
-        {
-          text: "Cancel",
-          style: "cancel"
-        },
-        {
-          text: "Logout",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await AsyncStorage.multiRemove(['userid', 'roleId', 'currentLoginTime']);
-              eventEmitter.emit(EVENTS.USER_LOGOUT);
-              router.replace("/");
-            } catch (error) {
-              console.error('Error during logout:', error);
-              Alert.alert('Error', 'Failed to logout. Please try again.');
-            }
-          }
-        }
-      ]
-    );
-  };
 
   return (
     <Tabs
@@ -48,14 +21,6 @@ export default function TabLayout() {
           backgroundColor: '#000000',
         },
         headerTintColor: '#fff',
-        headerRight: () => (
-          <TouchableOpacity 
-            onPress={handleLogout}
-            style={{ marginRight: 16 }}
-          >
-            <LogOut size={24} color="#fff" />
-          </TouchableOpacity>
-        ),
       }}>
 
       <Tabs.Screen
@@ -106,14 +71,16 @@ export default function TabLayout() {
                   <RefreshCw size={24} color="#fff" />
                 )}
               </TouchableOpacity>
-              <TouchableOpacity 
-                onPress={handleLogout}
-                style={{ marginRight: 16 }}
-              >
-                <LogOut size={24} color="#fff" />
-              </TouchableOpacity>
             </View>
           ),
+        }}
+      />
+
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ size, color }) => <Settings size={size} color={color} />,
         }}
       />
     </Tabs>
