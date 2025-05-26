@@ -514,7 +514,7 @@ const Map = () => {
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
       altitude: location.coords.altitude,
-      accuracy: location.coords.accuracy
+      accuracy: location.coords.accuracy ?? 0
     };
   };
 
@@ -678,7 +678,7 @@ const Map = () => {
                 console.error('Camera error:', error);
                 setShowCamera(false);
               }}
-              initialLocation={getCurrentLocationData()}
+              initialLocation={getCurrentLocationData() ?? undefined}
               showOverlay={true}
             />
           ) : (
@@ -690,7 +690,7 @@ const Map = () => {
                 showsUserLocation
                 showsMyLocationButton
                 onPress={handleMapPress}
-                initialRegion={currentLocation}
+                {...(currentLocation ? { initialRegion: currentLocation } : {})}
               >
                {renderedMarkers}
               </MapView>

@@ -211,8 +211,7 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
       <View style={styles.container}>
         <CameraView 
           ref={cameraRef}
-          style={styles.camera} 
-          type={facing}
+          style={styles.camera}
         >
           {showOverlay && (
             <View style={styles.overlay}>
@@ -295,7 +294,7 @@ export function useSurveyLocationData() {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         altitude: location.coords.altitude,
-        accuracy: location.coords.accuracy,
+        accuracy: location.coords.accuracy ?? 0,
       });
     };
 
@@ -310,7 +309,7 @@ export function useSurveyLocationData() {
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
           altitude: location.coords.altitude,
-          accuracy: location.coords.accuracy,
+          accuracy: location.coords.accuracy ?? 0,
         });
       }
     );
