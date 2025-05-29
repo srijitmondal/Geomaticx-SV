@@ -54,12 +54,31 @@ export default function TabLayout() {
           headerRight: () => (
             <View style={{ flexDirection: 'row', alignItems: 'center' }}>
               <TouchableOpacity 
-                onPress={() => {
-                  if (!syncing) {
+                onPress={() => {                  if (!syncing) {
                     setSyncing(true);
-                    eventEmitter.emit(EVENTS.GALLERY_SYNC);
-                    // Reset syncing state after animation
-                    setTimeout(() => setSyncing(false), 1000);
+                    import('../../utils/sync').then(({ syncAllMarkers }) => {
+                      syncAllMarkers().then((success) => {
+                        if (!success) {
+                          Alert.alert(
+                            'Sync Error',
+                            'Failed to sync some markers. Please try again.'
+                          );
+                        } else {
+                          Alert.alert(
+                            'Sync Complete',
+                            'All markers have been synchronized successfully.'
+                          );
+                        }
+                        setSyncing(false);
+                      });
+                    }).catch(error => {
+                      console.error('Error during sync:', error);
+                      Alert.alert(
+                        'Sync Error',
+                        'An error occurred while syncing. Please try again.'
+                      );
+                      setSyncing(false);
+                    });
                   }
                 }}
                 style={{ flexDirection: 'row', alignItems: 'center', marginRight: 16, gap: 8 }}

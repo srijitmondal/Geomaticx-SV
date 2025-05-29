@@ -118,8 +118,14 @@ export async function captureImageWithMetadata(
     if (error instanceof ImageCaptureError) {
       throw error;
     }
+    let errorMessage = 'Unknown error';
+    if (error instanceof Error && error.message) {
+      errorMessage = error.message;
+    } else if (typeof error === 'string') {
+      errorMessage = error;
+    }
     throw new ImageCaptureError(
-      `Failed to capture image: ${error.message}`,
+      `Failed to capture image: ${errorMessage}`,
       'UNKNOWN_ERROR'
     );
   }
@@ -173,7 +179,7 @@ async function collectMetadata(positionId: number = 0): Promise<ImageMetadata> {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         altitude: location.coords.altitude,
-        accuracy: location.coords.accuracy,
+        accuracy: location.coords.accuracy ?? 0,
         timestamp: location.timestamp,
       };
     }
