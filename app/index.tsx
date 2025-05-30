@@ -50,16 +50,18 @@ function LoginScreen() {
     if (fontsLoaded) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded]);
-  const validateEmailOrPhone = (value: string) => {
+  }, [fontsLoaded]);  const validateEmailOrPhone = (value: string) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\d{10}$/;  // Assumes 10-digit phone numbers
   
     if (!value) {
-      setEmailError('Email is required');
+      setEmailError('Email or Phone number is required');
       return false;
     }
-    if (!emailRegex.test(value)) {
-      setEmailError('Please enter a valid email address');
+    
+    // Check if it's a valid email or phone number
+    if (!emailRegex.test(value) && !phoneRegex.test(value)) {
+      setEmailError('Please enter a valid email address or phone number');
       return false;
     }
   
@@ -85,13 +87,16 @@ function LoginScreen() {
     const isPasswordValid = validatePassword(password);    if (isEmailValid && isPasswordValid) {
       setLoading(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/users/login`, {
+        const response = await fetch('http://192.168.1.46/user_login.php', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
           },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ 
+            identifier: email, 
+            password: password 
+          }),
         });
 
         // First check if the response is ok
@@ -104,19 +109,19 @@ function LoginScreen() {
         // Then try to parse JSON
         const data = await response.json();
         console.log('Login response:', data);
-        console.log(data.token)
-        console.log(data.user)
-        if (data.token && data.data.user) {
-          setLoginError('');          await Promise.all([
-            AsyncStorage.setItem('token', data.token),
-            AsyncStorage.setItem('userName', data.data.user.name),
-            AsyncStorage.setItem('userEmail', data.data.user.email)
+        
+        if (data.id) {
+          setLoginError('');
+          await Promise.all([
+            AsyncStorage.setItem('userId', data.id.toString()),
+            AsyncStorage.setItem('userName', data.name),
+            AsyncStorage.setItem('userRole', data.role)
           ]);
 
           eventEmitter.emit(EVENTS.USER_LOGIN);
           router.replace("/(tabs)/map");
         } else {
-          setLoginError(data.message || 'Invalid email or password');
+          setLoginError(data.error || 'Invalid email or password');
         }
       } catch (error) {
         console.error('Login error:', error);
@@ -175,10 +180,9 @@ function LoginScreen() {
                 >
                   {loginError}
                 </Animated.Text>
-              ) : null}
-
-              <TextInput
-                style={[styles.input, emailError && styles.inputError]}                placeholder="Email Address"
+              ) : null}              <TextInput
+                style={[styles.input, emailError && styles.inputError]}
+                placeholder="Email or Phone Number"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"

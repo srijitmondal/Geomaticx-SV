@@ -4,93 +4,46 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 import { eventEmitter, EVENTS } from '../../utils/events';
 import { useEffect, useState } from 'react';
-import { Upload, LogOut, RefreshCw, User, Mail } from 'lucide-react-native';
+import { Upload, LogOut, RefreshCw, User, Mail, Shield } from 'lucide-react-native';
+
+interface UserInfo {
+  name: string | null;
+  role: string | null;
+  id: string | null;
+}
 
 const handleImportShapeFile = () => {
   // TODO: Implement shape file import logic from server (base64)
   Alert.alert('Import Shape File', 'Import functionality is not yet implemented.');
 };
 
-const handleLogout = () => {
-  Alert.alert(
-    "Logout",
-    "Are you sure you want to logout?",
-    [
-      {
-        text: "Cancel",
-        style: "cancel"
-      },
-      {
-        text: "Logout",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            await AsyncStorage.multiRemove(['userid', 'roleId', 'currentLoginTime', 'userName', 'userEmail']);
-            eventEmitter.emit(EVENTS.USER_LOGOUT);
-            router.replace("/");
-          } catch (error) {
-            console.error('Error during logout:', error);
-            Alert.alert('Error', 'Failed to logout. Please try again.');
-          }
-        }
-      }
-    ]
-  );
-};
-
-const handleResetData = () => {
-  Alert.alert(
-    "Reset Data",
-    "Are you sure you want to delete all app data? This action cannot be undone.",
-    [
-      {
-        text: "Cancel",
-        style: "cancel"
-      },
-      {
-        text: "Reset",
-        style: "destructive",
-        onPress: async () => {
-          try {
-            // TODO: Implement data deletion logic
-            Alert.alert('Reset Data', 'Data reset functionality is not yet implemented.');
-          } catch (error) {
-            console.error('Error during data reset:', error);
-            Alert.alert('Error', 'Failed to reset data. Please try again.');
-          }
-        }
-      }
-    ]
-  );
-};
-
 export default function SettingsScreen() {
-  const [userName, setUserName] = useState<string | null>(null);
-  const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [userInfo, setUserInfo] = useState<UserInfo>({
+    name: null,
+    role: null,
+    id: null
+  });
+
   useEffect(() => {
-    const loadProfile = async () => {
+    const loadUserInfo = async () => {
       try {
-        const [name, email] = await Promise.all([
+        const [name, role, id] = await Promise.all([
           AsyncStorage.getItem('userName'),
-          AsyncStorage.getItem('userEmail')
+          AsyncStorage.getItem('userRole'),
+          AsyncStorage.getItem('userId')
         ]);
-        setUserName(name);
-        setUserEmail(email);
-        
-        if (!name || !email) {
-          console.warn('User profile data incomplete');
-        }
+
+        setUserInfo({ name, role, id });
       } catch (error) {
-        console.error('Error loading profile data:', error);
+        console.error('Error loading user info:', error);
       }
     };
 
-    loadProfile();
+    loadUserInfo();
     
     // Listen for logout events to clear the profile data
     const unsubscribe = eventEmitter.on(EVENTS.USER_LOGOUT, () => {
-      setUserName(null);
-      setUserEmail(null);
+      setUserInfo({ name: null, role: null, id: null });
     });
 
     return () => {
@@ -98,23 +51,83 @@ export default function SettingsScreen() {
     };
   }, []);
 
+  const handleLogout = () => {
+    Alert.alert(
+      "Logout",
+      "Are you sure you want to logout?",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Logout",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await AsyncStorage.multiRemove(['userId', 'userName', 'userRole']);
+              eventEmitter.emit(EVENTS.USER_LOGOUT);
+              router.replace("/");
+            } catch (error) {
+              console.error('Error during logout:', error);
+              Alert.alert('Error', 'Failed to logout. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleResetData = () => {
+    Alert.alert(
+      "Reset Data",
+      "Are you sure you want to delete all app data? This action cannot be undone.",
+      [
+        {
+          text: "Cancel",
+          style: "cancel"
+        },
+        {
+          text: "Reset",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              // TODO: Implement data deletion logic
+              Alert.alert('Reset Data', 'Data reset functionality is not yet implemented.');
+            } catch (error) {
+              console.error('Error during data reset:', error);
+              Alert.alert('Error', 'Failed to reset data. Please try again.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
   return (
     <ScrollView style={styles.container}>
-      <Text style={styles.title}>Thank You</Text>
-      
-      <View style={styles.profileContainer}>
-        <Text style={styles.sectionTitle}>Profile</Text>
-        <View style={styles.profileItem}>
-          <User size={20} color="#60a5fa" />
-          <Text style={styles.profileText}>{userName || 'Not available'}</Text>
+      {/* User Info Section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>User Information</Text>
+        <View style={styles.infoItem}>
+          <User size={20} color="#666" />
+          <Text style={styles.infoLabel}>Name:</Text>
+          <Text style={styles.infoValue}>{userInfo.name || 'N/A'}</Text>
         </View>
-        <View style={styles.profileItem}>
-          <Mail size={20} color="#60a5fa" />
-          <Text style={styles.profileText}>{userEmail || 'Not available'}</Text>
+        <View style={styles.infoItem}>
+          <Shield size={20} color="#666" />
+          <Text style={styles.infoLabel}>Role:</Text>
+          <Text style={styles.infoValue}>{userInfo.role || 'N/A'}</Text>
+        </View>
+        <View style={styles.infoItem}>
+          <Mail size={20} color="#666" />
+          <Text style={styles.infoLabel}>User ID:</Text>
+          <Text style={styles.infoValue}>{userInfo.id || 'N/A'}</Text>
         </View>
       </View>
 
-      <View style={styles.actionsContainer}>
+      {/* Actions Section */}
+      <View style={styles.section}>
         <Text style={styles.sectionTitle}>Actions</Text>
         
         <TouchableOpacity style={styles.button} onPress={handleImportShapeFile}>
@@ -141,68 +154,58 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#1a1b1e',
   },
-  title: {
-    fontSize: 32,
-    fontWeight: 'bold',
-    color: '#fff',
-    marginTop: 20,
-    marginBottom: 24,
-    paddingHorizontal: 20,
+  section: {
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    margin: 16,
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
     marginBottom: 16,
+    color: '#333',
   },
-  profileContainer: {
-    backgroundColor: '#2c2d31',
-    borderRadius: 16,
-    padding: 20,
-    marginHorizontal: 20,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
-  },
-  profileItem: {
+  infoItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
   },
-  profileText: {
+  infoLabel: {
+    marginLeft: 8,
     fontSize: 16,
-    color: '#fff',
-    marginLeft: 12,
+    color: '#666',
+    width: 80,
   },
-  actionsContainer: {
-    padding: 20,
+  infoValue: {
+    flex: 1,
+    fontSize: 16,
+    color: '#333',
+    marginLeft: 8,
   },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#3b82f6',
+    backgroundColor: '#333',
     padding: 16,
     borderRadius: 12,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  dangerButton: {
-    backgroundColor: '#dc2626',
-  },
-  logoutButton: {
-    backgroundColor: '#4b5563',
   },
   buttonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
     marginLeft: 12,
+  },
+  dangerButton: {
+    backgroundColor: '#d32f2f',
+  },  resetButton: {
+    backgroundColor: '#f57c00',
+  },
+  logoutButton: {
+    backgroundColor: '#d32f2f',
   },
 });
