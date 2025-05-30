@@ -1,4 +1,3 @@
-// filepath: c:\Users\Vayu\Desktop\Latest\Geomaticx-SV\app\(tabs)\settings.tsx
 import { View, Text, TouchableOpacity, Alert, StyleSheet, ScrollView } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
@@ -206,6 +205,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#f57c00',
   },
   logoutButton: {
-    backgroundColor: '#d32f2f',
+    backgroundColor: '#23792b',
   },
 });
