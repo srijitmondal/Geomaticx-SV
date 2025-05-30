@@ -11,12 +11,13 @@ import {
   ScrollView,
   ActivityIndicator
 } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Polygon } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SurveyCameraView, CameraRef, LocationData, SensorData } from './camera';
+import { eventEmitter, EVENTS } from '../../utils/events';
 
 interface MarkerData {
   id: number;
@@ -47,6 +48,7 @@ const Map = () => {
   const [selectedMarker, setSelectedMarker] = useState<MarkerData | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
+  const [importedShapes, setImportedShapes] = useState<GeoJSON.FeatureCollection | null>(null);
   const mapRef = useRef<MapView>(null);
   const cameraRef = useRef<CameraRef>(null);
   const [completedCount, setCompletedCount] = useState(0);
@@ -653,6 +655,56 @@ const Map = () => {
     return slots;
   };
 
+  // Load imported shapes from storage
+  useEffect(() => {
+    const loadShapes = async () => {
+      try {
+        const shapes = await AsyncStorage.getItem('imported_shapes');
+        if (shapes) {
+          setImportedShapes(JSON.parse(shapes));
+        }
+      } catch (error) {
+        console.error('Error loading shapes:', error);
+      }
+    };
+
+    loadShapes();
+
+    // Listen for new shape imports
+    const unsubscribe = eventEmitter.on(EVENTS.SHAPE_IMPORT, (shapes: GeoJSON.FeatureCollection) => {
+      setImportedShapes(shapes);
+    });
+
+    return () => {
+      unsubscribe.off(EVENTS.SHAPE_IMPORT);
+    };
+  }, []);
+
+  // Convert GeoJSON coordinates to react-native-maps format
+  const polygons = useMemo(() => {
+    if (!importedShapes) return [];
+
+    return importedShapes.features
+      .filter(feature => feature.geometry.type === 'Polygon')
+      .map((feature, index) => {
+        const polygon = feature.geometry as GeoJSON.Geometry & { coordinates: number[][][] };
+        const coordinates = polygon.coordinates[0].map(coord => ({
+          latitude: coord[1],
+          longitude: coord[0]
+        }));
+
+        return (
+          <Polygon
+            key={`polygon-${index}`}
+            coordinates={coordinates}
+            fillColor="rgba(0, 200, 0, 0.3)"
+            strokeColor="rgba(0, 200, 0, 0.8)"
+            strokeWidth={2}
+          />
+        );
+      });
+  }, [importedShapes]);
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -693,6 +745,7 @@ const Map = () => {
                 {...(currentLocation ? { initialRegion: currentLocation } : {})}
               >
                {renderedMarkers}
+               {polygons}
               </MapView>
 
               <TouchableOpacity

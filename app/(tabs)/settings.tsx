@@ -4,6 +4,8 @@ import { router } from 'expo-router';
 import { eventEmitter, EVENTS } from '../../utils/events';
 import { useEffect, useState } from 'react';
 import { Upload, LogOut, RefreshCw, User, Mail, Shield } from 'lucide-react-native';
+import * as FileSystem from 'expo-file-system';
+import * as DocumentPicker from 'expo-document-picker';
 
 interface UserInfo {
   name: string | null;
@@ -11,9 +13,41 @@ interface UserInfo {
   id: string | null;
 }
 
-const handleImportShapeFile = () => {
-  // TODO: Implement shape file import logic from server (base64)
-  Alert.alert('Import Shape File', 'Import functionality is not yet implemented.');
+const handleImportShapeFile = async () => {
+  try {
+    // Pick the GeoJSON file
+    const result = await DocumentPicker.getDocumentAsync({
+      type: ['application/json', 'application/geo+json']
+    });
+
+    if (!result.canceled) {
+      // Read the file
+      const fileContent = await FileSystem.readAsStringAsync(result.assets[0].uri);
+
+      try {
+        // Parse the GeoJSON data
+        const geojson = JSON.parse(fileContent);
+
+        // Validate that it's a GeoJSON file
+        if (geojson.type !== 'FeatureCollection' && geojson.type !== 'Feature') {
+          throw new Error('Invalid GeoJSON format');
+        }
+
+        // Store the GeoJSON data
+        await AsyncStorage.setItem('imported_shapes', JSON.stringify(geojson));
+
+        // Emit event to update map
+        eventEmitter.emit(EVENTS.SHAPE_IMPORT, geojson);
+
+        Alert.alert('Success', 'GeoJSON file imported successfully');
+      } catch (parseError) {
+        Alert.alert('Error', 'Invalid GeoJSON file. Please make sure you select a valid GeoJSON file.');
+      }
+    }
+  } catch (error) {
+    console.error('Error importing GeoJSON file:', error);
+    Alert.alert('Error', 'Failed to import file. Please try again.');
+  }
 };
 
 export default function SettingsScreen() {
@@ -76,7 +110,6 @@ export default function SettingsScreen() {
       ]
     );
   };
-
   const handleResetData = () => {
     Alert.alert(
       "Reset Data",
@@ -91,8 +124,26 @@ export default function SettingsScreen() {
           style: "destructive",
           onPress: async () => {
             try {
-              // TODO: Implement data deletion logic
-              Alert.alert('Reset Data', 'Data reset functionality is not yet implemented.');
+              // Delete all marker data from AsyncStorage
+              await AsyncStorage.removeItem('map_markers');
+
+              // Delete all images from the photos directory
+              const photosDir = `${FileSystem.documentDirectory}photos/`;
+              const dirInfo = await FileSystem.getInfoAsync(photosDir);
+              if (dirInfo.exists) {
+                const files = await FileSystem.readDirectoryAsync(photosDir);
+                await Promise.all(
+                  files.map(async (file) => {
+                    const filePath = `${photosDir}${file}`;
+                    await FileSystem.deleteAsync(filePath, { idempotent: true });
+                  })
+                );
+              }
+
+              // Emit events to update UI
+              eventEmitter.emit(EVENTS.GALLERY_SYNC);
+
+              Alert.alert('Reset Data', 'All data has been successfully deleted.');
             } catch (error) {
               console.error('Error during data reset:', error);
               Alert.alert('Error', 'Failed to reset data. Please try again.');
