@@ -1,5 +1,5 @@
 import { Platform } from 'react-native';
-import { manipulateAsync, SaveFormat } from 'expo-image-manipulator';
+import { SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
 import { Magnetometer, DeviceMotion } from 'expo-sensors';
