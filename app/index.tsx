@@ -55,13 +55,13 @@ function LoginScreen() {
     const phoneRegex = /^\d{10}$/;  // Assumes 10-digit phone numbers
   
     if (!value) {
-      setEmailError('Email or Phone number is required');
+      setEmailError('Telephone number or e-mail is required');
       return false;
     }
     
     // Check if it's a valid email or phone number
     if (!emailRegex.test(value) && !phoneRegex.test(value)) {
-      setEmailError('Please enter a valid email address or phone number');
+      setEmailError('Please enter a valid e-mail address or Telephone number');
       return false;
     }
   
@@ -97,13 +97,11 @@ function LoginScreen() {
             identifier: email, 
             password: password 
           }),
-        });
-
-        // First check if the response is ok
+        });        // First check if the response is ok
         if (!response.ok) {
           const errorText = await response.text();
           console.error('Server error response:', errorText);
-          throw new Error(`Enter Correct Email and Password`);
+          throw new Error('Enter Correct e-mail/Telephone and Password');
         }
 
         // Then try to parse JSON
@@ -173,16 +171,16 @@ function LoginScreen() {
               entering={FadeInUp.duration(1000).delay(400).springify()}
               style={styles.form}
             >
-              {loginError ? (
-                <Animated.Text 
-                  entering={FadeInUp.duration(400)}
-                  style={styles.errorText}
-                >
-                  {loginError}
-                </Animated.Text>
-              ) : null}              <TextInput
+        {loginError ? (
+                <Animated.View entering={FadeInUp.duration(400)}>
+                  <Text style={styles.errorText}>
+                    {loginError}
+                  </Text>
+                </Animated.View>
+              ) : null}
+              <TextInput
                 style={[styles.input, emailError && styles.inputError]}
-                placeholder="Email or Phone Number"
+                placeholder="E-mail or Telephone Number"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
