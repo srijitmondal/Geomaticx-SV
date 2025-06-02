@@ -87,7 +87,7 @@ function LoginScreen() {
     const isPasswordValid = validatePassword(password);    if (isEmailValid && isPasswordValid) {
       setLoading(true);
       try {
-        const response = await fetch('http://192.168.1.46/user_login.php', {
+        const response = await fetch('http://192.168.0.100/user_login.php', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

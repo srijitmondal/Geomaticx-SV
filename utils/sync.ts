@@ -16,7 +16,7 @@ export interface MarkerData {
 }
 
 // Use local IP address instead of localhost for mobile devices
-export const UPLOAD_ENDPOINT = 'http://192.168.1.46/upload_marker.php';
+export const UPLOAD_ENDPOINT = 'http://192.168.0.100/upload_marker.php';
 export const STORAGE_KEY = 'map_markers';
 
 // Convert a file URI to base64
