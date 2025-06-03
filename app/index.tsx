@@ -27,8 +27,7 @@ import Animated, { FadeInUp, FadeInDown } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import { eventEmitter, EVENTS } from '../utils/events';
 
-const API_BASE_URL = 'https://geomaticx-cam-backend.onrender.com/api';
-
+// Prevent the splash screen from hiding automatically
 SplashScreen.preventAutoHideAsync();
 
 function LoginScreen() {
@@ -87,7 +86,7 @@ function LoginScreen() {
     const isPasswordValid = validatePassword(password);    if (isEmailValid && isPasswordValid) {
       setLoading(true);
       try {
-        const response = await fetch('http://192.168.0.100/user_login.php', {
+        const response = await fetch('http://192.168.1.89/user_login.php', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
