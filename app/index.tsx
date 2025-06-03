@@ -1,3 +1,4 @@
+import { API_ENDPOINTS } from '../utils/config';
 import {  useEffect, useState } from 'react';
 import {
   View,
@@ -83,10 +84,11 @@ function LoginScreen() {
 
   const handleLogin = async () => {
     const isEmailValid = validateEmailOrPhone(email);
-    const isPasswordValid = validatePassword(password);    if (isEmailValid && isPasswordValid) {
+    const isPasswordValid = validatePassword(password);
+    if (isEmailValid && isPasswordValid) {
       setLoading(true);
       try {
-        const response = await fetch('http://192.168.1.89/user_login.php', {
+        const response = await fetch(API_ENDPOINTS.LOGIN, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',

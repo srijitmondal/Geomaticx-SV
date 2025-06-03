@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { eventEmitter, EVENTS } from './events';
+import { API_ENDPOINTS } from './config';
 
 export interface MarkerData {
   id: number;
@@ -15,8 +16,8 @@ export interface MarkerData {
   isComplete: boolean;
 }
 
-// Use local IP address instead of localhost for mobile devices
-export const UPLOAD_ENDPOINT = 'http://192.168.1.89/upload_marker.php';
+// Use configured API endpoint
+export const UPLOAD_ENDPOINT = API_ENDPOINTS.UPLOAD_MARKER;
 export const STORAGE_KEY = 'map_markers';
 
 // Convert a file URI to base64
