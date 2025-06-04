@@ -59,7 +59,111 @@ const Map = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [currentCaptureTarget, setCurrentCaptureTarget] = useState<'centerPoll' | number>('centerPoll');
   const [isLoading, setIsLoading] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 2000; // 2 seconds
 
+  const zoomToCurrentLocation = useCallback(async () => {
+    try {
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      
+      if (mapRef.current && currentLocation) {
+        mapRef.current.animateToRegion({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+          latitudeDelta: 0.0006, // Closer zoom level
+          longitudeDelta: 0.0006,
+        });
+      }
+      setLocation(currentLocation);
+    } catch (error) {
+      console.error('Error getting current location:', error);
+      Alert.alert('Location Error', 'Unable to get current location. Please check your GPS settings.');
+    }
+  }, []);
+
+  const getCurrentLocationWithRetry = async () => {
+    try {
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      setLocation(currentLocation);
+      setErrorMsg(null);
+
+      if (mapRef.current && currentLocation) {
+        mapRef.current.animateToRegion({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+          latitudeDelta: 0.0004,
+          longitudeDelta: 0.0004,
+        });
+      }
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error getting location:', error);
+      if (retryCount < MAX_RETRIES) {
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+          getCurrentLocationWithRetry();
+        }, RETRY_DELAY);
+      } else {
+        setErrorMsg('Unable to get location. Please check your GPS settings and try again.');
+        setIsLoading(false);
+      }
+    }
+  };
+
+  // Location subscription for real-time updates
+  useEffect(() => {
+    let locationSubscription: Location.LocationSubscription | null = null;
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (!isMounted) return;
+
+        if (status !== 'granted') {
+          setErrorMsg('Permission to access location was denied');
+          setIsLoading(false);
+          return;
+        }
+
+        // Get initial location
+        getCurrentLocationWithRetry();
+
+        // Subscribe to location updates with optimized settings
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 10, // Update every 10 meters
+            timeInterval: 5000, // Or every 5 seconds
+          },
+          (newLocation) => {
+            if (isMounted) {
+              setLocation(newLocation);
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error in location setup:', error);
+        if (isMounted) {
+          setErrorMsg('Location services error. Please try again.');
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    // Cleanup subscription and prevent memory leaks
+    return () => {
+      isMounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, [retryCount]);
 
   const currentLocation = useMemo(() => {
     if (!location) return null;
@@ -120,38 +224,40 @@ const Map = () => {
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
-        setIsLoading(false);
-        return;
-      }
+  const handleMarkerPress = useCallback((marker: MarkerData) => {
+    setSelectedMarker(marker);
+    setModalVisible(true);
+  }, []);
 
-      try {
-        const currentLocation = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.High,
-        });
-        setLocation(currentLocation);
+  // Optimize marker rendering
+  const renderedMarkers = useMemo(() => (
+    markers.map(marker => (
+      <Marker
+        key={`${marker.id}-${marker.isComplete}`}
+        coordinate={marker.coordinate}
+        pinColor={marker.isComplete ? "green" : "yellow"}
+        onPress={() => handleMarkerPress(marker)}
+        tracksViewChanges={false}
+      />
+    ))
+  ), [markers, handleMarkerPress]);
 
-        // Zoom to max possible level at user's current location
-        if (mapRef.current && currentLocation) {
-          mapRef.current.animateToRegion({
-            latitude: currentLocation.coords.latitude,
-            longitude: currentLocation.coords.longitude,
-            latitudeDelta: 0.0005,
-            longitudeDelta: 0.0005,
-          });
-        }
-      } catch (error) {
-        console.error('Error getting location:', error);
-        setErrorMsg('Failed to get current location');
-      } finally {
-        setIsLoading(false);
-      }
-    })();
-  }, [ [modalVisible]]);
+  // Add map ready handler
+  const onMapReady = useCallback(() => {
+    if (location && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.0007,
+        longitudeDelta: 0.0007,
+      });
+    }
+  }, [location]);
+
+  // Optimize map component with useCallback
+  const handleRegionChange = useCallback(() => {
+    // Add debounced region change handling if needed
+  }, []);
 
   const handleMapPress = useCallback((event: any) => {
     if (!editingMode) return;
@@ -170,25 +276,10 @@ const Map = () => {
     saveMarkers(updatedMarkers);
   }, [editingMode, markers]);
 
-  const handleMarkerPress = useCallback((marker: MarkerData) => {
-    setSelectedMarker(marker);
-    setModalVisible(true);
-  }, []);
-
   const handleModalClose = useCallback(() => {
     setModalVisible(false);
   }, []);
 
-  const renderedMarkers = useMemo(() => (
-    markers.map(marker => (
-      <Marker
-        key={`${marker.id}-${marker.isComplete}`}
-        coordinate={marker.coordinate}
-        pinColor={marker.isComplete ? "green" : "yellow"}
-        onPress={() => handleMarkerPress(marker)}
-      />
-    ))
-  ), [markers, handleMarkerPress]);
   const handleConnectionCountChange = (connectionCount: number) => {
     if (selectedMarker) {
       const updatedMarkers = markers.map(marker => {
@@ -719,6 +810,16 @@ const Map = () => {
       {errorMsg ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{errorMsg}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={() => {
+              setRetryCount(0);
+              setIsLoading(true);
+              setErrorMsg(null);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <>
@@ -726,7 +827,7 @@ const Map = () => {
             <SurveyCameraView
               ref={cameraRef}
               onCapture={handleCameraCapture}
-              onError={(error :any) => {
+              onError={(error) => {
                 console.error('Camera error:', error);
                 setShowCamera(false);
               }}
@@ -740,13 +841,28 @@ const Map = () => {
                 style={styles.map}
                 mapType="satellite"
                 showsUserLocation
-                showsMyLocationButton
+                showsMyLocationButton={false}
                 onPress={handleMapPress}
+                onMapReady={onMapReady}
+                onRegionChange={handleRegionChange}
+                loadingEnabled={true}
+                moveOnMarkerPress={false}
                 {...(currentLocation ? { initialRegion: currentLocation } : {})}
               >
-               {renderedMarkers}
-               {polygons}
+                {renderedMarkers}
+                {polygons}
               </MapView>
+
+              <TouchableOpacity
+                style={[styles.locationButton]}
+                onPress={zoomToCurrentLocation}
+              >
+                <FontAwesome
+                  name="location-arrow"
+                  size={24}
+                  color="#000"
+                />
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
@@ -1251,6 +1367,35 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginTop: 10,
     fontSize: 16,
+  },
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#4285F4',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  locationButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: '#fff',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
   },
 });
 
