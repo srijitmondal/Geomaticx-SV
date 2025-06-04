@@ -3,6 +3,7 @@ import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { eventEmitter, EVENTS } from './events';
 import { API_ENDPOINTS } from './config';
+import { ImageMetadata } from './imageCapture';
 
 export interface MarkerData {
   id: number;
@@ -55,11 +56,21 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
   
   // Handle center poll image
   let centerPoleBase64 = null;
+  let centerPoleMetadata = null;
   if (marker.centerPollImage) {
     try {
       const uri = marker.centerPollImage;
       console.log('Reading center poll image from:', uri);
       centerPoleBase64 = await fileToBase64(uri);
+      
+      // Try to read metadata file
+      const metadataUri = `${uri}.json`;
+      const metadataInfo = await FileSystem.getInfoAsync(metadataUri);
+      if (metadataInfo.exists) {
+        const metadataContent = await FileSystem.readAsStringAsync(metadataUri);
+        centerPoleMetadata = JSON.parse(metadataContent) as ImageMetadata;
+      }
+      
       console.log('Successfully converted center poll image to base64');
     } catch (err) {
       const error = err instanceof Error ? err : new Error('Unknown error occurred');
@@ -75,20 +86,31 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
       try {
         console.log(`Reading branch image ${index + 1}/${marker.connectionImages.length}:`, img);
         const base64 = await fileToBase64(img);
+        
+        // Try to read metadata file
+        let metadata: ImageMetadata | null = null;
+        const metadataUri = `${img}.json`;
+        const metadataInfo = await FileSystem.getInfoAsync(metadataUri);
+        if (metadataInfo.exists) {
+          const metadataContent = await FileSystem.readAsStringAsync(metadataUri);
+          metadata = JSON.parse(metadataContent) as ImageMetadata;
+        }
+        
         console.log(`Successfully converted branch image ${index + 1}`);
         return {
           url: base64,
-          heading: 0, // Default heading if not available
-          timestamp: new Date().toISOString(),
+          heading: metadata?.sensors?.compass?.magneticNorth ?? 0,
+          timestamp: metadata?.timestamp?.utc ?? new Date().toISOString(),
           deviceInfo: {
-            model: Platform.OS === 'ios' ? 'iOS' : 'Android',
-            manufacturer: 'Unknown'
+            model: metadata?.device?.model ?? (Platform.OS === 'ios' ? 'iOS' : 'Android'),
+            manufacturer: metadata?.device?.platform ?? 'Unknown'
           },
           imageProperties: {
             width: 4032,
             height: 3024,
             format: 'jpeg'
-          }
+          },
+          metadata: metadata
         };
       } catch (err) {
         const error = err instanceof Error ? err : new Error('Unknown error occurred');
@@ -104,10 +126,10 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
     location: marker.coordinate,
     centerPole: centerPoleBase64 ? {
       url: centerPoleBase64,
-      metadata: { timestamp: new Date().toISOString() },
+      metadata: centerPoleMetadata ?? { timestamp: new Date().toISOString() },
       deviceInfo: {
-        model: Platform.OS === 'ios' ? 'iOS' : 'Android',
-        manufacturer: 'Unknown'
+        model: centerPoleMetadata?.device?.model ?? (Platform.OS === 'ios' ? 'iOS' : 'Android'),
+        manufacturer: centerPoleMetadata?.device?.platform ?? 'Unknown'
       },
       imageProperties: {
         width: 4032,

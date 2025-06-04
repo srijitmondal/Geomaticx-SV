@@ -36,7 +36,7 @@ interface CameraMetadata {
   exposureTime: number;
 }
 
-interface ImageMetadata {
+export interface ImageMetadata {
   timestamp: {
     utc: string;
     local: string;
