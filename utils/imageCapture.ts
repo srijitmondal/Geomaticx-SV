@@ -2,12 +2,11 @@ import { Platform } from 'react-native';
 import { SaveFormat } from 'expo-image-manipulator';
 import * as FileSystem from 'expo-file-system';
 import * as Location from 'expo-location';
-import { Magnetometer, DeviceMotion } from 'expo-sensors';
+import { DeviceMotion } from 'expo-sensors';
 
 interface SensorData {
   compass: {
-    magneticNorth: number;
-    trueNorth: number | null;
+    heading: number;
   };
   orientation: {
     pitch: number;
@@ -133,13 +132,7 @@ export async function captureImageWithMetadata(
 
 async function collectMetadata(positionId: number = 0): Promise<ImageMetadata> {
   // Initialize sensors early
-  const [magnetometerPromise, motionPromise] = await Promise.all([
-    new Promise<any>((resolve) => {
-      const subscription = Magnetometer.addListener((data) => {
-        resolve(data);
-        subscription.remove();
-      });
-    }),
+  const [motionPromise] = await Promise.all([
     DeviceMotion.isAvailableAsync().then(available => {
       if (!available) return null;
       return new Promise<any>((resolve) => {
@@ -185,27 +178,44 @@ async function collectMetadata(positionId: number = 0): Promise<ImageMetadata> {
     }
 
     // Process sensor data that was collected earlier
-    const [magnetometer, motion] = await Promise.all([
-      magnetometerPromise,
-      motionPromise
-    ]);
+    const motion = await motionPromise;
 
-    metadata.sensors = {
-      compass: {
-        magneticNorth: Math.atan2(magnetometer?.y || 0, magnetometer?.x || 0) * (180 / Math.PI),
-        trueNorth: null,
-      },
-      orientation: {
-        pitch: motion?.rotation?.beta ?? 0,
-        roll: motion?.rotation?.gamma ?? 0,
-        yaw: motion?.rotation?.alpha ?? 0,
-      },
-      acceleration: {
-        x: motion?.acceleration?.x ?? 0,
-        y: motion?.acceleration?.y ?? 0,
-        z: motion?.acceleration?.z ?? 0,
-      },
-    };
+    if (motion?.rotation) {
+      const { alpha, beta, gamma } = motion.rotation;
+      
+      // Convert to degrees
+      const alphaDeg = (alpha || 0) * (180 / Math.PI);
+      const betaDeg = (beta || 0) * (180 / Math.PI);
+      const gammaDeg = (gamma || 0) * (180 / Math.PI);
+
+      // Calculate heading based on device orientation
+      let heading = alphaDeg;
+      
+      // Adjust heading based on device tilt
+      if (Math.abs(betaDeg) > 45 || Math.abs(gammaDeg) > 45) {
+        // Device is tilted too much, use 0 as fallback
+        heading = 0;
+      } else {
+        // Normalize heading to 0-360
+        heading = ((heading % 360) + 360) % 360;
+      }
+
+      metadata.sensors = {
+        compass: {
+          heading: heading,
+        },
+        orientation: {
+          pitch: betaDeg,
+          roll: gammaDeg,
+          yaw: alphaDeg,
+        },
+        acceleration: {
+          x: motion?.acceleration?.x ?? 0,
+          y: motion?.acceleration?.y ?? 0,
+          z: motion?.acceleration?.z ?? 0,
+        },
+      };
+    }
 
   } catch (error) {
     console.warn('Error collecting metadata:', error);

@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 're
 import { StyleSheet, View, Text, TouchableOpacity, Platform } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
-import { Accelerometer, Magnetometer } from 'expo-sensors';
+import { Accelerometer, DeviceMotion } from 'expo-sensors';
 import { Camera as CameraIcon, Crosshair } from 'lucide-react-native';
 import { captureImageWithMetadata, ImageCaptureError } from '@/utils/imageCapture';
 
@@ -73,7 +73,7 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
 
       const subscribeToSensors = async () => {
         Accelerometer.setUpdateInterval(100);
-        Magnetometer.setUpdateInterval(100);
+        DeviceMotion.setUpdateInterval(100);
 
         const accelerometerSubscription = Accelerometer.addListener(data => {
           const pitch = Math.atan2(-data.x, Math.sqrt(data.y * data.y + data.z * data.z)) * (180 / Math.PI);
@@ -81,14 +81,35 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
           setSensorData(prev => ({ ...prev, pitch, roll }));
         });
 
-        const magnetometerSubscription = Magnetometer.addListener(data => {
-          const heading = Math.atan2(data.y, data.x) * (180 / Math.PI);
-          setSensorData(prev => ({ ...prev, compass: heading }));
+        const motionSubscription = DeviceMotion.addListener(data => {
+          if (!data.rotation) return;
+
+          // Get the device orientation
+          const { alpha, beta, gamma } = data.rotation;
+          
+          // Convert to degrees
+          const alphaDeg = (alpha || 0) * (180 / Math.PI);
+          const betaDeg = (beta || 0) * (180 / Math.PI);
+          const gammaDeg = (gamma || 0) * (180 / Math.PI);
+
+          // Calculate heading based on device orientation
+          let newHeading = alphaDeg;
+          
+          // Adjust heading based on device tilt
+          if (Math.abs(betaDeg) > 45 || Math.abs(gammaDeg) > 45) {
+            // Device is tilted too much, use last valid heading
+            newHeading = sensorData.compass;
+          } else {
+            // Normalize heading to 0-360
+            newHeading = ((newHeading % 360) + 360) % 360;
+          }
+
+          setSensorData(prev => ({ ...prev, compass: newHeading }));
         });
 
         return () => {
           accelerometerSubscription.remove();
-          magnetometerSubscription.remove();
+          motionSubscription.remove();
         };
       };
 
