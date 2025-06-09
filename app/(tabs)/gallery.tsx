@@ -19,8 +19,7 @@ interface PhotoMetadata {
   } | null;
   sensors: {
     compass: {
-      magneticNorth: number;
-      trueNorth: number | null;
+      heading: number;
     };
     orientation: {
       pitch: number;
@@ -284,7 +283,24 @@ export default function GalleryScreen() {
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+    try {
+      const date = new Date(dateString);
+      if (isNaN(date.getTime())) {
+        return 'Invalid Date';
+      }
+      return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true
+      });
+    } catch (error) {
+      console.warn('Error formatting date:', error);
+      return 'Invalid Date';
+    }
   };
 
   if (Platform.OS === 'web') {
@@ -431,7 +447,7 @@ export default function GalleryScreen() {
                   
                   <View style={styles.detailsSection}>
                     <Text style={styles.detailsLabel}>
-                      Captured: {selectedPhoto.metadata.timestamp?.local ? formatDate(selectedPhoto.metadata.timestamp.local) : 'Unknown'}
+                      Captured: {selectedPhoto.metadata.timestamp?.utc ? formatDate(selectedPhoto.metadata.timestamp.utc) : 'Unknown'}
                     </Text>
                   </View>
 
@@ -465,7 +481,7 @@ export default function GalleryScreen() {
                         <Text style={styles.detailsSubtitle}>Orientation</Text>
                       </View>
                       <Text style={styles.detailsText}>
-                        Magnetic North: {selectedPhoto.metadata.sensors.compass?.magneticNorth?.toFixed(1) ?? 'N/A'}°
+                        Magnetic North: {selectedPhoto.metadata.sensors.compass?.heading?.toFixed(1) ?? 'N/A'}°
                       </Text>
                       <View style={styles.detailsHeader}>
                         <ArrowUpDown color="#60a5fa" size={20} />
