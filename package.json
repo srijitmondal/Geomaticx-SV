@@ -68,6 +68,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@types/expo": "^32.0.13",
     "@types/react": "~18.3.12",
     "@types/uuid": "^10.0.0",
     "typescript": "^5.3.3"

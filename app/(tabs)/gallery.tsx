@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { StyleSheet, View, Text, Image, ScrollView, TouchableOpacity, Platform, Dimensions, Modal, Share, Alert } from 'react-native';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -46,6 +46,7 @@ export default function GalleryScreen() {
   const [selectedPhoto, setSelectedPhoto] = useState<Photo | null>(null);
   const [selectedPhotos, setSelectedPhotos] = useState<Set<string>>(new Set());
   const [selectionMode, setSelectionMode] = useState(false);
+  const [imageLoadError, setImageLoadError] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -86,6 +87,12 @@ export default function GalleryScreen() {
           let metadata = null;
 
           try {
+            const fileInfo = await FileSystem.getInfoAsync(uri);
+            if (!fileInfo.exists) {
+              console.warn(`File does not exist: ${uri}`);
+              return null;
+            }
+
             const metadataFile = `${uri}.json`;
             const metadataInfo = await FileSystem.getInfoAsync(metadataFile);
             
@@ -101,7 +108,9 @@ export default function GalleryScreen() {
         })
       );
 
-      const sortedPhotos = photoData.sort((a, b) => {
+      const validPhotos = photoData.filter((photo): photo is Photo => photo !== null);
+
+      const sortedPhotos = validPhotos.sort((a, b) => {
         const timeA = a.metadata?.timestamp.utc ? new Date(a.metadata.timestamp.utc).getTime() : 0;
         const timeB = b.metadata?.timestamp.utc ? new Date(b.metadata.timestamp.utc).getTime() : 0;
         return timeB - timeA;
@@ -262,6 +271,7 @@ export default function GalleryScreen() {
     if (selectionMode) {
       togglePhotoSelection(photo);
     } else {
+      setImageLoadError(null);
       setSelectedPhoto(photo);
     }
   };
@@ -404,7 +414,16 @@ export default function GalleryScreen() {
                 source={{ uri: selectedPhoto.uri }}
                 style={styles.modalImage}
                 resizeMode="contain"
+                onError={(error) => {
+                  console.error('Error loading image:', error.nativeEvent.error);
+                  setImageLoadError('Failed to load image');
+                }}
               />
+              {imageLoadError && (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{imageLoadError}</Text>
+                </View>
+              )}
 
               {selectedPhoto.metadata && (
                 <View style={styles.detailsContainer}>
@@ -412,7 +431,7 @@ export default function GalleryScreen() {
                   
                   <View style={styles.detailsSection}>
                     <Text style={styles.detailsLabel}>
-                      Captured: {formatDate(selectedPhoto.metadata.timestamp.local)}
+                      Captured: {selectedPhoto.metadata.timestamp?.local ? formatDate(selectedPhoto.metadata.timestamp.local) : 'Unknown'}
                     </Text>
                   </View>
 
@@ -423,18 +442,18 @@ export default function GalleryScreen() {
                         <Text style={styles.detailsSubtitle}>Location</Text>
                       </View>
                       <Text style={styles.detailsText}>
-                        Latitude: {selectedPhoto.metadata.location.latitude.toFixed(6)}°
+                        Latitude: {selectedPhoto.metadata.location.latitude?.toFixed(6) ?? 'N/A'}°
                       </Text>
                       <Text style={styles.detailsText}>
-                        Longitude: {selectedPhoto.metadata.location.longitude.toFixed(6)}°
+                        Longitude: {selectedPhoto.metadata.location.longitude?.toFixed(6) ?? 'N/A'}°
                       </Text>
-                      {selectedPhoto.metadata.location.altitude && (
+                      {selectedPhoto.metadata.location.altitude !== null && (
                         <Text style={styles.detailsText}>
-                          Altitude: {selectedPhoto.metadata.location.altitude.toFixed(1)}m
+                          Altitude: {selectedPhoto.metadata.location.altitude?.toFixed(1) ?? 'N/A'}m
                         </Text>
                       )}
                       <Text style={styles.detailsText}>
-                        Accuracy: ±{selectedPhoto.metadata.location.accuracy.toFixed(1)}m
+                        Accuracy: ±{selectedPhoto.metadata.location.accuracy?.toFixed(1) ?? 'N/A'}m
                       </Text>
                     </View>
                   )}
@@ -446,20 +465,20 @@ export default function GalleryScreen() {
                         <Text style={styles.detailsSubtitle}>Orientation</Text>
                       </View>
                       <Text style={styles.detailsText}>
-                        Magnetic North: {selectedPhoto.metadata.sensors.compass.magneticNorth.toFixed(1)}°
+                        Magnetic North: {selectedPhoto.metadata.sensors.compass?.magneticNorth?.toFixed(1) ?? 'N/A'}°
                       </Text>
                       <View style={styles.detailsHeader}>
                         <ArrowUpDown color="#60a5fa" size={20} />
                         <Text style={styles.detailsSubtitle}>Device Orientation</Text>
                       </View>
                       <Text style={styles.detailsText}>
-                        Pitch: {selectedPhoto.metadata.sensors.orientation.pitch.toFixed(1)}°
+                        Pitch: {selectedPhoto.metadata.sensors.orientation?.pitch?.toFixed(1) ?? 'N/A'}°
                       </Text>
                       <Text style={styles.detailsText}>
-                        Roll: {selectedPhoto.metadata.sensors.orientation.roll.toFixed(1)}°
+                        Roll: {selectedPhoto.metadata.sensors.orientation?.roll?.toFixed(1) ?? 'N/A'}°
                       </Text>
                       <Text style={styles.detailsText}>
-                        Yaw: {selectedPhoto.metadata.sensors.orientation.yaw.toFixed(1)}°
+                        Yaw: {selectedPhoto.metadata.sensors.orientation?.yaw?.toFixed(1) ?? 'N/A'}°
                       </Text>
                     </View>
                   )}
@@ -630,5 +649,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontFamily: 'monospace',
     marginBottom: 4,
+  },
+  errorContainer: {
+    padding: 16,
+    backgroundColor: '#ef4444',
+    margin: 16,
+    borderRadius: 8,
   },
 });

@@ -99,7 +99,7 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
         console.log(`Successfully converted branch image ${index + 1}`);
         return {
           url: base64,
-          heading: metadata?.sensors?.compass?.magneticNorth ?? 0,
+          heading: metadata?.sensors?.compass?.heading ?? 0,
           timestamp: metadata?.timestamp?.utc ?? new Date().toISOString(),
           deviceInfo: {
             model: metadata?.device?.model ?? (Platform.OS === 'ios' ? 'iOS' : 'Android'),
@@ -110,7 +110,13 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
             height: 3024,
             format: 'jpeg'
           },
-          metadata: metadata
+          metadata: {
+            timestamp: metadata?.timestamp?.utc ?? new Date().toISOString(),
+            location: metadata?.location ?? null,
+            sensors: metadata?.sensors ?? null,
+            device: metadata?.device ?? null,
+            positionId: metadata?.positionId ?? 0
+          }
         };
       } catch (err) {
         const error = err instanceof Error ? err : new Error('Unknown error occurred');
@@ -126,7 +132,13 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
     location: marker.coordinate,
     centerPole: centerPoleBase64 ? {
       url: centerPoleBase64,
-      metadata: centerPoleMetadata ?? { timestamp: new Date().toISOString() },
+      metadata: {
+        timestamp: centerPoleMetadata?.timestamp?.utc ?? new Date().toISOString(),
+        location: centerPoleMetadata?.location ?? null,
+        sensors: centerPoleMetadata?.sensors ?? null,
+        device: centerPoleMetadata?.device ?? null,
+        positionId: centerPoleMetadata?.positionId ?? 0
+      },
       deviceInfo: {
         model: centerPoleMetadata?.device?.model ?? (Platform.OS === 'ios' ? 'iOS' : 'Android'),
         manufacturer: centerPoleMetadata?.device?.platform ?? 'Unknown'
@@ -137,7 +149,13 @@ const convertMarkerToUploadFormat = async (marker: MarkerData) => {
         format: 'jpeg'
       }
     } : null,
-    branchImages: branchImagesBase64
+    branchImages: branchImagesBase64.map(img => ({
+      url: img.url,
+      heading: img.heading,
+      deviceInfo: img.deviceInfo,
+      metadata: img.metadata,
+      imageProperties: img.imageProperties
+    }))
   };
 };
 
