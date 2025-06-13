@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Platform } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Platform, Animated } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
 import { Accelerometer, DeviceMotion, Magnetometer } from 'expo-sensors';
@@ -55,6 +55,45 @@ interface CameraProps {
   initialLocation?: LocationData;
   showOverlay?: boolean;
 }
+
+// Add GridLines component before the SurveyCameraView
+const GridLines = () => {
+  return (
+    <View style={styles.gridContainer}>
+      {/* Vertical lines */}
+      <View style={[styles.gridLine, styles.verticalLine1]} />
+      <View style={[styles.gridLine, styles.verticalLine2]} />
+      {/* Horizontal lines */}
+      <View style={[styles.gridLine, styles.horizontalLine1]} />
+      <View style={[styles.gridLine, styles.horizontalLine2]} />
+    </View>
+  );
+};
+
+// Add CompassArrow component before the SurveyCameraView
+const CompassArrow = ({ heading }: { heading: number }) => {
+  const rotateAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.timing(rotateAnim, {
+      toValue: heading,
+      duration: 100,
+      useNativeDriver: true,
+    }).start();
+  }, [heading]);
+
+  const spin = rotateAnim.interpolate({
+    inputRange: [0, 360],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <Animated.View style={[styles.arrowContainer, { transform: [{ rotate: spin }] }]}>
+      <View style={styles.arrowHead} />
+      <View style={styles.arrowBody} />
+    </Animated.View>
+  );
+};
 
 export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
   ({ onCapture, onLocationUpdate, onError, initialLocation, showOverlay = true }, ref) => {
@@ -251,7 +290,8 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
         >
           {showOverlay && (
             <View style={styles.overlay}>
-              <Crosshair color="#60a5fa" size={48} />
+              <GridLines />
+              <CompassArrow heading={sensorData.compass} />
               
               <View style={styles.infoContainer}>
                 <Text style={styles.infoText}>
@@ -437,6 +477,59 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     textAlign: 'center',
+  },
+  gridContainer: {
+    ...StyleSheet.absoluteFillObject,
+    pointerEvents: 'none',
+  },
+  gridLine: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  verticalLine1: {
+    width: 1,
+    height: '100%',
+    left: '33.33%',
+  },
+  verticalLine2: {
+    width: 1,
+    height: '100%',
+    left: '66.66%',
+  },
+  horizontalLine1: {
+    width: '100%',
+    height: 1,
+    top: '33.33%',
+  },
+  horizontalLine2: {
+    width: '100%',
+    height: 1,
+    top: '66.66%',
+  },
+  arrowContainer: {
+    width: 120,
+    height: 120,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  arrowHead: {
+    width: 0,
+    height: 0,
+    backgroundColor: 'transparent',
+    borderStyle: 'solid',
+    borderLeftWidth: 30,
+    borderRightWidth: 30,
+    borderBottomWidth: 60,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    borderBottomColor: '#ff0000',
+    transform: [{ translateY: -10 }],
+  },
+  arrowBody: {
+    width: 8,
+    height: 40,
+    backgroundColor: '#ff0000',
+    transform: [{ translateY: -10 }],
   },
 });
 export default SurveyCameraView;

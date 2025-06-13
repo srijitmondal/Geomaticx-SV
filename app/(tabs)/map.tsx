@@ -42,6 +42,8 @@ interface ArrowData {
     longitude: number;
   };
   heading: number;
+  markerId: number;
+  connectionIndex: number;
 }
 
 interface CaptureResult {
@@ -76,6 +78,9 @@ const Map = () => {
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 2000; // 2 seconds
   const [arrows, setArrows] = useState<ArrowData[]>([]);
+  const [selectedArrowImage, setSelectedArrowImage] = useState<string | null>(null);
+  const [arrowImageModalVisible, setArrowImageModalVisible] = useState(false);
+  const [showArrows, setShowArrows] = useState(true);
 
   const zoomToCurrentLocation = useCallback(async () => {
     try {
@@ -862,7 +867,9 @@ const Map = () => {
             newArrows.push({
               start: marker.coordinate,
               end: endPoint,
-              heading: connectionData.sensors.compass.heading
+              heading: connectionData.sensors.compass.heading,
+              markerId: marker.id,
+              connectionIndex: i
             });
           } catch (error) {
             console.error('Error reading connection metadata:', error);
@@ -880,6 +887,15 @@ const Map = () => {
   useEffect(() => {
     generateArrows(markers);
   }, [markers, generateArrows]);
+
+  // Handle arrow press
+  const handleArrowPress = (arrow: ArrowData) => {
+    const marker = markers.find(m => m.id === arrow.markerId);
+    if (marker && marker.connectionImages[arrow.connectionIndex]) {
+      setSelectedArrowImage(marker.connectionImages[arrow.connectionIndex]);
+      setArrowImageModalVisible(true);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -936,7 +952,7 @@ const Map = () => {
               >
                 {renderedMarkers}
                 {polygons}
-                {arrows.map((arrow, index) => (
+                {showArrows && arrows.map((arrow, index) => (
                   <Polygon
                     key={`arrow-${index}`}
                     coordinates={[
@@ -960,6 +976,8 @@ const Map = () => {
                     fillColor="rgba(255, 0, 0, 0.5)"
                     strokeColor="rgba(255, 0, 0, 0.8)"
                     strokeWidth={2}
+                    tappable={true}
+                    onPress={() => handleArrowPress(arrow)}
                   />
                 ))}
               </MapView>
@@ -986,6 +1004,21 @@ const Map = () => {
                   name="edit"
                   size={24}
                   color={editingMode ? '#fff' : '#000'}
+                />
+              </TouchableOpacity>
+
+              {/* Add Arrow Toggle Button */}
+              <TouchableOpacity
+                style={[
+                  styles.arrowToggleButton,
+                  showArrows ? styles.arrowToggleButtonActive : null,
+                ]}
+                onPress={() => setShowArrows(!showArrows)}
+              >
+                <FontAwesome
+                  name="arrows-alt"
+                  size={24}
+                  color={showArrows ? '#fff' : '#000'}
                 />
               </TouchableOpacity>
 
@@ -1121,6 +1154,34 @@ const Map = () => {
                     <Text style={[styles.confirmButtonText, styles.deleteText]}>Remove</Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Arrow Image Modal */}
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={arrowImageModalVisible}
+            onRequestClose={() => setArrowImageModalVisible(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.arrowImageModalContent}>
+                <View style={styles.arrowImageModalHeader}>
+                  <TouchableOpacity
+                    onPress={() => setArrowImageModalVisible(false)}
+                    style={styles.closeButton}
+                  >
+                    <FontAwesome name="close" size={24} color="#000" />
+                  </TouchableOpacity>
+                </View>
+                {selectedArrowImage && (
+                  <Image
+                    source={{ uri: selectedArrowImage }}
+                    style={styles.arrowImage}
+                    resizeMode="contain"
+                  />
+                )}
               </View>
             </View>
           </Modal>
@@ -1507,6 +1568,48 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 3,
+  },
+  arrowImageModalContent: {
+    width: '90%',
+    height: '80%',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  arrowImageModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 10,
+  },
+  arrowImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  arrowToggleButton: {
+    position: 'absolute',
+    bottom: 140, // Positioned above the edit button
+    right: 20,
+    backgroundColor: '#fff',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  arrowToggleButtonActive: {
+    backgroundColor: '#4285F4',
   },
 });
 
