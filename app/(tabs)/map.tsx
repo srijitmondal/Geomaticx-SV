@@ -9,13 +9,16 @@ import {
   Platform,
   Alert,
   ScrollView,
+  ActivityIndicator
 } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import MapView, { Marker, Polygon } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SurveyCameraView, CameraRef, LocationData, SensorData } from './camera';
+import { eventEmitter, EVENTS } from '../../utils/events';
+import * as FileSystem from 'expo-file-system';
 
 interface MarkerData {
   id: number;
@@ -27,6 +30,20 @@ interface MarkerData {
   connectionImages: string[]; // Connection images
   connectionCount: number;
   isComplete: boolean;
+}
+
+interface ArrowData {
+  start: {
+    latitude: number;
+    longitude: number;
+  };
+  end: {
+    latitude: number;
+    longitude: number;
+  };
+  heading: number;
+  markerId: number;
+  connectionIndex: number;
 }
 
 interface CaptureResult {
@@ -46,6 +63,7 @@ const Map = () => {
   const [selectedMarker, setSelectedMarker] = useState<MarkerData | null>(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
+  const [importedShapes, setImportedShapes] = useState<GeoJSON.FeatureCollection | null>(null);
   const mapRef = useRef<MapView>(null);
   const cameraRef = useRef<CameraRef>(null);
   const [completedCount, setCompletedCount] = useState(0);
@@ -55,7 +73,116 @@ const Map = () => {
   const [connectionDeleteConfirmVisible, setConnectionDeleteConfirmVisible] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [currentCaptureTarget, setCurrentCaptureTarget] = useState<'centerPoll' | number>('centerPoll');
+  const [isLoading, setIsLoading] = useState(true);
+  const [retryCount, setRetryCount] = useState(0);
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 2000; // 2 seconds
+  const [arrows, setArrows] = useState<ArrowData[]>([]);
+  const [selectedArrowImage, setSelectedArrowImage] = useState<string | null>(null);
+  const [arrowImageModalVisible, setArrowImageModalVisible] = useState(false);
+  const [showArrows, setShowArrows] = useState(true);
 
+  const zoomToCurrentLocation = useCallback(async () => {
+    try {
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      
+      if (mapRef.current && currentLocation) {
+        mapRef.current.animateToRegion({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+          latitudeDelta: 0.0006, // Closer zoom level
+          longitudeDelta: 0.0006,
+        });
+      }
+      setLocation(currentLocation);
+    } catch (error) {
+      console.error('Error getting current location:', error);
+      Alert.alert('Location Error', 'Unable to get current location. Please check your GPS settings.');
+    }
+  }, []);
+
+  const getCurrentLocationWithRetry = async () => {
+    try {
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+      setLocation(currentLocation);
+      setErrorMsg(null);
+
+      if (mapRef.current && currentLocation) {
+        mapRef.current.animateToRegion({
+          latitude: currentLocation.coords.latitude,
+          longitude: currentLocation.coords.longitude,
+          latitudeDelta: 0.0004,
+          longitudeDelta: 0.0004,
+        });
+      }
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error getting location:', error);
+      if (retryCount < MAX_RETRIES) {
+        setTimeout(() => {
+          setRetryCount(prev => prev + 1);
+          getCurrentLocationWithRetry();
+        }, RETRY_DELAY);
+      } else {
+        setErrorMsg('Unable to get location. Please check your GPS settings and try again.');
+        setIsLoading(false);
+      }
+    }
+  };
+
+  // Location subscription for real-time updates
+  useEffect(() => {
+    let locationSubscription: Location.LocationSubscription | null = null;
+    let isMounted = true;
+
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (!isMounted) return;
+
+        if (status !== 'granted') {
+          setErrorMsg('Permission to access location was denied');
+          setIsLoading(false);
+          return;
+        }
+
+        // Get initial location
+        getCurrentLocationWithRetry();
+
+        // Subscribe to location updates with optimized settings
+        locationSubscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.Balanced,
+            distanceInterval: 10, // Update every 10 meters
+            timeInterval: 5000, // Or every 5 seconds
+          },
+          (newLocation) => {
+            if (isMounted) {
+              setLocation(newLocation);
+            }
+          }
+        );
+      } catch (error) {
+        console.error('Error in location setup:', error);
+        if (isMounted) {
+          setErrorMsg('Location services error. Please try again.');
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    // Cleanup subscription and prevent memory leaks
+    return () => {
+      isMounted = false;
+      if (locationSubscription) {
+        locationSubscription.remove();
+      }
+    };
+  }, [retryCount]);
 
   const currentLocation = useMemo(() => {
     if (!location) return null;
@@ -107,7 +234,7 @@ const Map = () => {
   //   }
   // };
   
-
+  
   const saveMarkers = async (markersToSave: MarkerData[]) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(markersToSave));
@@ -116,29 +243,39 @@ const Map = () => {
     }
   };
 
-  useEffect(() => {
-    (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setErrorMsg('Permission to access location was denied');
-        return;
-      }
+  const handleMarkerPress = useCallback((marker: MarkerData) => {
+    setSelectedMarker(marker);
+    setModalVisible(true);
+  }, []);
 
-      const currentLocation = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
+  // Optimize marker rendering
+  const renderedMarkers = useMemo(() => (
+    markers.map(marker => (
+      <Marker
+        key={`${marker.id}-${marker.isComplete}`}
+        coordinate={marker.coordinate}
+        pinColor={marker.isComplete ? "green" : "yellow"}
+        onPress={() => handleMarkerPress(marker)}
+        tracksViewChanges={false}
+      />
+    ))
+  ), [markers, handleMarkerPress]);
+
+  // Add map ready handler
+  const onMapReady = useCallback(() => {
+    if (location && mapRef.current) {
+      mapRef.current.animateToRegion({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        latitudeDelta: 0.0007,
+        longitudeDelta: 0.0007,
       });
-      setLocation(currentLocation);
+    }
+  }, [location]);
 
-      // Zoom to max possible level at user's current location
-      if (mapRef.current && currentLocation) {
-        mapRef.current.animateToRegion({
-          latitude: currentLocation.coords.latitude,
-          longitude: currentLocation.coords.longitude,
-          latitudeDelta: 0.0005, // Very zoomed in (close to max possible)
-          longitudeDelta: 0.0005,
-        });
-      }
-    })();
+  // Optimize map component with useCallback
+  const handleRegionChange = useCallback(() => {
+    // Add debounced region change handling if needed
   }, []);
 
   const handleMapPress = useCallback((event: any) => {
@@ -158,25 +295,10 @@ const Map = () => {
     saveMarkers(updatedMarkers);
   }, [editingMode, markers]);
 
-  const handleMarkerPress = useCallback((marker: MarkerData) => {
-    setSelectedMarker(marker);
-    setModalVisible(true);
-  }, []);
-
   const handleModalClose = useCallback(() => {
     setModalVisible(false);
   }, []);
 
-  const renderedMarkers = useMemo(() => (
-    markers.map(marker => (
-      <Marker
-        key={`${marker.id}-${marker.isComplete}`}
-        coordinate={marker.coordinate}
-        pinColor={marker.isComplete ? "green" : "yellow"}
-        onPress={() => handleMarkerPress(marker)}
-      />
-    ))
-  ), [markers, handleMarkerPress]);
   const handleConnectionCountChange = (connectionCount: number) => {
     if (selectedMarker) {
       const updatedMarkers = markers.map(marker => {
@@ -504,7 +626,7 @@ const Map = () => {
       latitude: location.coords.latitude,
       longitude: location.coords.longitude,
       altitude: location.coords.altitude,
-      accuracy: location.coords.accuracy
+      accuracy: location.coords.accuracy ?? 0
     };
   };
 
@@ -643,11 +765,162 @@ const Map = () => {
     return slots;
   };
 
+  // Load imported shapes from storage
+  useEffect(() => {
+    const loadShapes = async () => {
+      try {
+        const shapes = await AsyncStorage.getItem('imported_shapes');
+        if (shapes) {
+          setImportedShapes(JSON.parse(shapes));
+        }
+      } catch (error) {
+        console.error('Error loading shapes:', error);
+      }
+    };
+
+    loadShapes();
+
+    // Listen for new shape imports
+    const unsubscribe = eventEmitter.on(EVENTS.SHAPE_IMPORT, (shapes: GeoJSON.FeatureCollection) => {
+      setImportedShapes(shapes);
+    });
+
+    return () => {
+      unsubscribe.off(EVENTS.SHAPE_IMPORT);
+    };
+  }, []);
+
+  // Convert GeoJSON coordinates to react-native-maps format
+  const polygons = useMemo(() => {
+    if (!importedShapes) return [];
+
+    return importedShapes.features
+      .filter(feature => feature.geometry.type === 'Polygon')
+      .map((feature, index) => {
+        const polygon = feature.geometry as GeoJSON.Geometry & { coordinates: number[][][] };
+        const coordinates = polygon.coordinates[0].map(coord => ({
+          latitude: coord[1],
+          longitude: coord[0]
+        }));
+
+        return (
+          <Polygon
+            key={`polygon-${index}`}
+            coordinates={coordinates}
+            fillColor="rgba(0, 200, 0, 0.3)"
+            strokeColor="rgba(0, 200, 0, 0.8)"
+            strokeWidth={2}
+          />
+        );
+      });
+  }, [importedShapes]);
+
+  // Helper function to calculate end point of arrow based on heading and distance
+  const calculateArrowEndPoint = (
+    startLat: number,
+    startLng: number,
+    heading: number,
+    distance: number = 0.0001 // Default distance in degrees (approximately 10 meters)
+  ): { latitude: number; longitude: number } => {
+    // Convert heading to radians
+    const headingRad = (heading * Math.PI) / 180;
+    
+    // Calculate the change in latitude and longitude
+    const latChange = distance * Math.cos(headingRad);
+    const lngChange = distance * Math.sin(headingRad);
+    
+    return {
+      latitude: startLat + latChange,
+      longitude: startLng + lngChange
+    };
+  };
+
+  // Function to generate arrows from marker data
+  const generateArrows = useCallback(async (markers: MarkerData[]) => {
+    const newArrows: ArrowData[] = [];
+    
+    for (const marker of markers) {
+      if (!marker.centerPollImage) continue;
+      
+      // Read metadata for center pole
+      const centerPoleMetadataUri = `${marker.centerPollImage}.json`;
+      try {
+        const centerPoleMetadata = await FileSystem.readAsStringAsync(centerPoleMetadataUri);
+        const metadata = JSON.parse(centerPoleMetadata);
+        
+        // Generate arrows for each connection image
+        for (let i = 0; i < marker.connectionImages.length; i++) {
+          const connectionImage = marker.connectionImages[i];
+          const connectionMetadataUri = `${connectionImage}.json`;
+          
+          try {
+            const connectionMetadata = await FileSystem.readAsStringAsync(connectionMetadataUri);
+            const connectionData = JSON.parse(connectionMetadata);
+            
+            // Calculate arrow end point based on heading
+            const endPoint = calculateArrowEndPoint(
+              marker.coordinate.latitude,
+              marker.coordinate.longitude,
+              connectionData.sensors.compass.heading
+            );
+            
+            newArrows.push({
+              start: marker.coordinate,
+              end: endPoint,
+              heading: connectionData.sensors.compass.heading,
+              markerId: marker.id,
+              connectionIndex: i
+            });
+          } catch (error) {
+            console.error('Error reading connection metadata:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Error reading center pole metadata:', error);
+      }
+    }
+    
+    setArrows(newArrows);
+  }, []);
+
+  // Update arrows when markers change
+  useEffect(() => {
+    generateArrows(markers);
+  }, [markers, generateArrows]);
+
+  // Handle arrow press
+  const handleArrowPress = (arrow: ArrowData) => {
+    const marker = markers.find(m => m.id === arrow.markerId);
+    if (marker && marker.connectionImages[arrow.connectionIndex]) {
+      setSelectedArrowImage(marker.connectionImages[arrow.connectionIndex]);
+      setArrowImageModalVisible(true);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Getting your location...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {errorMsg ? (
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>{errorMsg}</Text>
+          <TouchableOpacity 
+            style={styles.retryButton}
+            onPress={() => {
+              setRetryCount(0);
+              setIsLoading(true);
+              setErrorMsg(null);
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       ) : (
         <>
@@ -655,11 +928,11 @@ const Map = () => {
             <SurveyCameraView
               ref={cameraRef}
               onCapture={handleCameraCapture}
-              onError={(error :any) => {
+              onError={(error) => {
                 console.error('Camera error:', error);
                 setShowCamera(false);
               }}
-              initialLocation={getCurrentLocationData()}
+              initialLocation={getCurrentLocationData() ?? undefined}
               showOverlay={true}
             />
           ) : (
@@ -669,12 +942,56 @@ const Map = () => {
                 style={styles.map}
                 mapType="satellite"
                 showsUserLocation
-                showsMyLocationButton
+                showsMyLocationButton={false}
                 onPress={handleMapPress}
-                initialRegion={currentLocation}
+                onMapReady={onMapReady}
+                onRegionChange={handleRegionChange}
+                loadingEnabled={true}
+                moveOnMarkerPress={false}
+                {...(currentLocation ? { initialRegion: currentLocation } : {})}
               >
-               {renderedMarkers}
+                {renderedMarkers}
+                {polygons}
+                {showArrows && arrows.map((arrow, index) => (
+                  <Polygon
+                    key={`arrow-${index}`}
+                    coordinates={[
+                      arrow.start,
+                      arrow.end,
+                      calculateArrowEndPoint(
+                        arrow.end.latitude,
+                        arrow.end.longitude,
+                        (arrow.heading + 150) % 360,
+                        0.00002
+                      ),
+                      arrow.end,
+                      calculateArrowEndPoint(
+                        arrow.end.latitude,
+                        arrow.end.longitude,
+                        (arrow.heading - 150) % 360,
+                        0.00002
+                      ),
+                      arrow.end
+                    ]}
+                    fillColor="rgba(255, 0, 0, 0.5)"
+                    strokeColor="rgba(255, 0, 0, 0.8)"
+                    strokeWidth={2}
+                    tappable={true}
+                    onPress={() => handleArrowPress(arrow)}
+                  />
+                ))}
               </MapView>
+
+              <TouchableOpacity
+                style={[styles.locationButton]}
+                onPress={zoomToCurrentLocation}
+              >
+                <FontAwesome
+                  name="location-arrow"
+                  size={24}
+                  color="#000"
+                />
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={[
@@ -687,6 +1004,21 @@ const Map = () => {
                   name="edit"
                   size={24}
                   color={editingMode ? '#fff' : '#000'}
+                />
+              </TouchableOpacity>
+
+              {/* Add Arrow Toggle Button */}
+              <TouchableOpacity
+                style={[
+                  styles.arrowToggleButton,
+                  showArrows ? styles.arrowToggleButtonActive : null,
+                ]}
+                onPress={() => setShowArrows(!showArrows)}
+              >
+                <FontAwesome
+                  name="arrows-alt"
+                  size={24}
+                  color={showArrows ? '#fff' : '#000'}
                 />
               </TouchableOpacity>
 
@@ -822,6 +1154,34 @@ const Map = () => {
                     <Text style={[styles.confirmButtonText, styles.deleteText]}>Remove</Text>
                   </TouchableOpacity>
                 </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Arrow Image Modal */}
+          <Modal
+            animationType="fade"
+            transparent={true}
+            visible={arrowImageModalVisible}
+            onRequestClose={() => setArrowImageModalVisible(false)}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.arrowImageModalContent}>
+                <View style={styles.arrowImageModalHeader}>
+                  <TouchableOpacity
+                    onPress={() => setArrowImageModalVisible(false)}
+                    style={styles.closeButton}
+                  >
+                    <FontAwesome name="close" size={24} color="#000" />
+                  </TouchableOpacity>
+                </View>
+                {selectedArrowImage && (
+                  <Image
+                    source={{ uri: selectedArrowImage }}
+                    style={styles.arrowImage}
+                    resizeMode="contain"
+                  />
+                )}
               </View>
             </View>
           </Modal>
@@ -1168,6 +1528,88 @@ const styles = StyleSheet.create({
   },
   deleteText: {
     color: 'red',
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 10,
+    fontSize: 16,
+  },
+  retryButton: {
+    marginTop: 20,
+    backgroundColor: '#4285F4',
+    paddingVertical: 12,
+    paddingHorizontal: 30,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  locationButton: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    backgroundColor: '#fff',
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  arrowImageModalContent: {
+    width: '90%',
+    height: '80%',
+    backgroundColor: 'white',
+    borderRadius: 10,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  arrowImageModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    marginBottom: 10,
+  },
+  arrowImage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    borderRadius: 8,
+  },
+  arrowToggleButton: {
+    position: 'absolute',
+    bottom: 140, // Positioned above the edit button
+    right: 20,
+    backgroundColor: '#fff',
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 3,
+  },
+  arrowToggleButtonActive: {
+    backgroundColor: '#4285F4',
   },
 });
 
