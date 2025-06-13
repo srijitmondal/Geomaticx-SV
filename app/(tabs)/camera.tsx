@@ -71,27 +71,12 @@ const GridLines = () => {
 };
 
 // Add CompassArrow component before the SurveyCameraView
-const CompassArrow = ({ heading }: { heading: number }) => {
-  const rotateAnim = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.timing(rotateAnim, {
-      toValue: heading,
-      duration: 100,
-      useNativeDriver: true,
-    }).start();
-  }, [heading]);
-
-  const spin = rotateAnim.interpolate({
-    inputRange: [0, 360],
-    outputRange: ['0deg', '360deg'],
-  });
-
+const CompassArrow = () => {
   return (
-    <Animated.View style={[styles.arrowContainer, { transform: [{ rotate: spin }] }]}>
+    <View style={[styles.arrowContainer, { transform: [{ rotate: '0deg' }] }]}>
       <View style={styles.arrowHead} />
       <View style={styles.arrowBody} />
-    </Animated.View>
+    </View>
   );
 };
 
@@ -291,7 +276,7 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
           {showOverlay && (
             <View style={styles.overlay}>
               <GridLines />
-              <CompassArrow heading={sensorData.compass} />
+              <CompassArrow />
               
               <View style={styles.infoContainer}>
                 <Text style={styles.infoText}>
@@ -522,13 +507,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 60,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderBottomColor: '#ff0000',
+    borderBottomColor: 'rgba(255, 0, 0, 0.7)',
     transform: [{ translateY: -10 }],
   },
   arrowBody: {
     width: 8,
     height: 40,
-    backgroundColor: '#ff0000',
+    backgroundColor: 'rgba(255, 0, 0, 0.7)',
     transform: [{ translateY: -10 }],
   },
 });
