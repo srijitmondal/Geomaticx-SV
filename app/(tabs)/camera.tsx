@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 're
 import { StyleSheet, View, Text, TouchableOpacity, Platform } from 'react-native';
 import { CameraView, CameraType, useCameraPermissions } from 'expo-camera';
 import * as Location from 'expo-location';
-import { Accelerometer, DeviceMotion } from 'expo-sensors';
+import { Accelerometer, DeviceMotion, Magnetometer } from 'expo-sensors';
 import { Camera as CameraIcon, Crosshair } from 'lucide-react-native';
 import { captureImageWithMetadata, ImageCaptureError } from '@/utils/imageCapture';
 
@@ -33,6 +33,20 @@ export interface CameraRef {
   getCurrentLocation: () => LocationData | null;
   getCurrentSensorData: () => SensorData;
 }
+
+// Shared state for calibrated compass heading
+let calibratedHeading = 0;
+let isCalibrated = false;
+
+export const setCalibratedHeading = (heading: number) => {
+  calibratedHeading = heading;
+  isCalibrated = true;
+};
+
+export const getCalibratedHeading = () => ({
+  heading: calibratedHeading,
+  isCalibrated
+});
 
 interface CameraProps {
   onCapture?: (result: CaptureResult) => void;
@@ -74,6 +88,7 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
       const subscribeToSensors = async () => {
         Accelerometer.setUpdateInterval(100);
         DeviceMotion.setUpdateInterval(100);
+        Magnetometer.setUpdateInterval(100);
 
         const accelerometerSubscription = Accelerometer.addListener(data => {
           const pitch = Math.atan2(-data.x, Math.sqrt(data.y * data.y + data.z * data.z)) * (180 / Math.PI);
@@ -92,8 +107,8 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
           const betaDeg = (beta || 0) * (180 / Math.PI);
           const gammaDeg = (gamma || 0) * (180 / Math.PI);
 
-          // Calculate heading based on device orientation
-          let newHeading = alphaDeg;
+          // Use calibrated heading if available, otherwise use device motion
+          let newHeading = isCalibrated ? calibratedHeading : alphaDeg;
           
           // Adjust heading based on device tilt
           if (Math.abs(betaDeg) > 45 || Math.abs(gammaDeg) > 45) {

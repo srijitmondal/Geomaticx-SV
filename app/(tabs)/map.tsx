@@ -18,6 +18,7 @@ import { FontAwesome } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SurveyCameraView, CameraRef, LocationData, SensorData } from './camera';
 import { eventEmitter, EVENTS } from '../../utils/events';
+import * as FileSystem from 'expo-file-system';
 
 interface MarkerData {
   id: number;
@@ -29,6 +30,18 @@ interface MarkerData {
   connectionImages: string[]; // Connection images
   connectionCount: number;
   isComplete: boolean;
+}
+
+interface ArrowData {
+  start: {
+    latitude: number;
+    longitude: number;
+  };
+  end: {
+    latitude: number;
+    longitude: number;
+  };
+  heading: number;
 }
 
 interface CaptureResult {
@@ -62,6 +75,7 @@ const Map = () => {
   const [retryCount, setRetryCount] = useState(0);
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 2000; // 2 seconds
+  const [arrows, setArrows] = useState<ArrowData[]>([]);
 
   const zoomToCurrentLocation = useCallback(async () => {
     try {
@@ -796,6 +810,77 @@ const Map = () => {
       });
   }, [importedShapes]);
 
+  // Helper function to calculate end point of arrow based on heading and distance
+  const calculateArrowEndPoint = (
+    startLat: number,
+    startLng: number,
+    heading: number,
+    distance: number = 0.0001 // Default distance in degrees (approximately 10 meters)
+  ): { latitude: number; longitude: number } => {
+    // Convert heading to radians
+    const headingRad = (heading * Math.PI) / 180;
+    
+    // Calculate the change in latitude and longitude
+    const latChange = distance * Math.cos(headingRad);
+    const lngChange = distance * Math.sin(headingRad);
+    
+    return {
+      latitude: startLat + latChange,
+      longitude: startLng + lngChange
+    };
+  };
+
+  // Function to generate arrows from marker data
+  const generateArrows = useCallback(async (markers: MarkerData[]) => {
+    const newArrows: ArrowData[] = [];
+    
+    for (const marker of markers) {
+      if (!marker.centerPollImage) continue;
+      
+      // Read metadata for center pole
+      const centerPoleMetadataUri = `${marker.centerPollImage}.json`;
+      try {
+        const centerPoleMetadata = await FileSystem.readAsStringAsync(centerPoleMetadataUri);
+        const metadata = JSON.parse(centerPoleMetadata);
+        
+        // Generate arrows for each connection image
+        for (let i = 0; i < marker.connectionImages.length; i++) {
+          const connectionImage = marker.connectionImages[i];
+          const connectionMetadataUri = `${connectionImage}.json`;
+          
+          try {
+            const connectionMetadata = await FileSystem.readAsStringAsync(connectionMetadataUri);
+            const connectionData = JSON.parse(connectionMetadata);
+            
+            // Calculate arrow end point based on heading
+            const endPoint = calculateArrowEndPoint(
+              marker.coordinate.latitude,
+              marker.coordinate.longitude,
+              connectionData.sensors.compass.heading
+            );
+            
+            newArrows.push({
+              start: marker.coordinate,
+              end: endPoint,
+              heading: connectionData.sensors.compass.heading
+            });
+          } catch (error) {
+            console.error('Error reading connection metadata:', error);
+          }
+        }
+      } catch (error) {
+        console.error('Error reading center pole metadata:', error);
+      }
+    }
+    
+    setArrows(newArrows);
+  }, []);
+
+  // Update arrows when markers change
+  useEffect(() => {
+    generateArrows(markers);
+  }, [markers, generateArrows]);
+
   if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
@@ -851,6 +936,32 @@ const Map = () => {
               >
                 {renderedMarkers}
                 {polygons}
+                {arrows.map((arrow, index) => (
+                  <Polygon
+                    key={`arrow-${index}`}
+                    coordinates={[
+                      arrow.start,
+                      arrow.end,
+                      calculateArrowEndPoint(
+                        arrow.end.latitude,
+                        arrow.end.longitude,
+                        (arrow.heading + 150) % 360,
+                        0.00002
+                      ),
+                      arrow.end,
+                      calculateArrowEndPoint(
+                        arrow.end.latitude,
+                        arrow.end.longitude,
+                        (arrow.heading - 150) % 360,
+                        0.00002
+                      ),
+                      arrow.end
+                    ]}
+                    fillColor="rgba(255, 0, 0, 0.5)"
+                    strokeColor="rgba(255, 0, 0, 0.8)"
+                    strokeWidth={2}
+                  />
+                ))}
               </MapView>
 
               <TouchableOpacity

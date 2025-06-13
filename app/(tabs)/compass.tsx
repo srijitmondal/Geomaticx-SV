@@ -4,6 +4,7 @@ import { Magnetometer, Accelerometer } from 'expo-sensors';
 import { Compass } from 'lucide-react-native';
 import * as Haptics from 'expo-haptics';
 import * as Location from 'expo-location';
+import { setCalibratedHeading } from './camera';
 
 // Kalman Filter implementation for heading with adjusted parameters
 class KalmanFilter {
@@ -291,6 +292,13 @@ export default function CompassScreen() {
       }
     }
   };
+
+  // Update shared calibrated heading when heading changes
+  useEffect(() => {
+    if (!magneticInterference && !isCalibrating) {
+      setCalibratedHeading(heading);
+    }
+  }, [heading, magneticInterference, isCalibrating]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;

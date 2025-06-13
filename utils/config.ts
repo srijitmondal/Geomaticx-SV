@@ -1,5 +1,5 @@
 // Server configuration
-export const API_BASE_URL = 'http://192.168.1.4'; // Replace with your actual server IP or domain
+export const API_BASE_URL = 'http://192.168.1.89'; // Replace with your actual server IP or domain
 
 // API endpoints
 export const API_ENDPOINTS = {
