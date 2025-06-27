@@ -94,7 +94,7 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
     const [location, setLocation] = useState<LocationData | null>(initialLocation || null);
     const [error, setError] = useState<string | null>(null);
     const [capturing, setCapturing] = useState(false);
-
+    const prevHeadingref = useRef<number>(0);
     // Expose methods via ref
     useImperativeHandle(ref, () => ({
       capture: async () => {
@@ -137,10 +137,11 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
           // Adjust heading based on device tilt
           if (Math.abs(betaDeg) > 45 || Math.abs(gammaDeg) > 45) {
             // Device is tilted too much, use last valid heading
-            newHeading = sensorData.compass;
+            newHeading = prevHeadingref.current;
           } else {
             // Normalize heading to 0-360
             newHeading = ((newHeading % 360) + 360) % 360;
+            prevHeadingref.current = newHeading; // Store last valid heading
           }
 
           setSensorData(prev => ({ ...prev, compass: newHeading }));
