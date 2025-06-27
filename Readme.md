@@ -1,5 +1,4 @@
 # SV-Camera
-
 A React Native mobile application for geospatial data collection and synchronization, designed to capture, store, and upload location-based marker data with associated imagery.
 
 ## Features
