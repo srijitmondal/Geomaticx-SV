@@ -109,52 +109,45 @@ export const SurveyCameraView = forwardRef<CameraRef, CameraProps>(
         return;
       }
 
-      const subscribeToSensors = async () => {
-        Accelerometer.setUpdateInterval(100);
-        DeviceMotion.setUpdateInterval(100);
-        Magnetometer.setUpdateInterval(100);
+      // accelerometer for pitch and roll
+      Accelerometer.setUpdateInterval(100);
+      const accelerometerSubscription = Accelerometer.addListener(data => {
+        const pitch = Math.atan2(-data.x, Math.sqrt(data.y * data.y + data.z * data.z)) * (180 / Math.PI);
+        const roll = Math.atan2(data.y, data.z) * (180 / Math.PI);
+        setSensorData(prev => ({ ...prev, pitch, roll }));
+      });
 
-        const accelerometerSubscription = Accelerometer.addListener(data => {
-          const pitch = Math.atan2(-data.x, Math.sqrt(data.y * data.y + data.z * data.z)) * (180 / Math.PI);
-          const roll = Math.atan2(data.y, data.z) * (180 / Math.PI);
-          setSensorData(prev => ({ ...prev, pitch, roll }));
-        });
-
-        const motionSubscription = DeviceMotion.addListener(data => {
-          if (!data.rotation) return;
-
-          // Get the device orientation
-          const { alpha, beta, gamma } = data.rotation;
-          
-          // Convert to degrees
-          const alphaDeg = (alpha || 0) * (180 / Math.PI);
-          const betaDeg = (beta || 0) * (180 / Math.PI);
-          const gammaDeg = (gamma || 0) * (180 / Math.PI);
-
-          // Use calibrated heading if available, otherwise use device motion
-          let newHeading = isCalibrated ? calibratedHeading : alphaDeg;
-          
-          // Adjust heading based on device tilt
-          if (Math.abs(betaDeg) > 45 || Math.abs(gammaDeg) > 45) {
-            // Device is tilted too much, use last valid heading
-            newHeading = prevHeadingref.current;
-          } else {
-            // Normalize heading to 0-360
-            newHeading = ((newHeading % 360) + 360) % 360;
-            prevHeadingref.current = newHeading; // Store last valid heading
-          }
-
-          setSensorData(prev => ({ ...prev, compass: newHeading }));
-        });
-
-        return () => {
-          accelerometerSubscription.remove();
-          motionSubscription.remove();
-        };
+      // compass heading
+      let headingSubscription: Location.LocationSubscription | undefined;
+      const startHeadingUpdates = async () => {
+        if (!locationPermission?.granted) {
+          // It will be requested in another effect, but we can wait.
+          return;
+        }
+        
+        try {
+          headingSubscription = await Location.watchHeadingAsync(heading => {
+            let newHeading = heading.trueHeading > -1 ? heading.trueHeading : heading.magHeading;
+            
+            if (isCalibrated) {
+              newHeading = calibratedHeading; // allow override
+            }
+            
+            newHeading = ((newHeading % 360) + 360) % 360; // normalize
+            setSensorData(prev => ({ ...prev, compass: newHeading }));
+          });
+        } catch (e) {
+          console.error("Failed to start heading updates:", e);
+          setError("Could not get heading updates.");
+        }
       };
+      startHeadingUpdates();
 
-      subscribeToSensors();
-    }, []);
+      return () => {
+        accelerometerSubscription?.remove();
+        headingSubscription?.remove();
+      };
+    }, [locationPermission]);
 
     useEffect(() => {
       if (Platform.OS === 'web') {
